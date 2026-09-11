@@ -100,6 +100,35 @@ local function keyFrom(name, fallback)
     if type(name) ~= "string" or name == "" then return fallback end
     return Enum.KeyCode[name] or fallback
 end
+local BIND_ALIASES = { M1 = "MouseButton1", M2 = "MouseButton2", M3 = "MouseButton3" }
+local function bindName(bind)
+    if not bind then return "None" end
+    if typeof(bind) ~= "EnumItem" then return tostring(bind) end
+    if bind.EnumType == Enum.UserInputType then
+        if bind == Enum.UserInputType.MouseButton1 then return "M1" end
+        if bind == Enum.UserInputType.MouseButton2 then return "M2" end
+        if bind == Enum.UserInputType.MouseButton3 then return "M3" end
+    end
+    return bind.Name
+end
+local function bindFrom(name, fallback)
+    fallback = fallback or Enum.KeyCode.E
+    if type(name) ~= "string" or name == "" then return fallback end
+    local resolved = BIND_ALIASES[name] or name
+    local mouse = Enum.UserInputType[resolved]
+    if mouse and mouse.EnumType == Enum.UserInputType then return mouse end
+    return Enum.KeyCode[resolved] or fallback
+end
+local function isMouseBind(bind)
+    return typeof(bind) == "EnumItem" and bind.EnumType == Enum.UserInputType
+end
+local function bindMatch(input, bind)
+    if not bind or typeof(bind) ~= "EnumItem" then return false end
+    if bind.EnumType == Enum.KeyCode then
+        return input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == bind
+    end
+    return input.UserInputType == bind
+end
 local function loadConfig()
     if not (isfile and readfile and isfile(CONFIG_PATH)) then return nil end
     local ok, data = pcall(function() return HttpService:JSONDecode(readfile(CONFIG_PATH)) end)
@@ -115,7 +144,7 @@ local SavedSettings = Saved.Settings or {}
 
 local Aim = {
     Enabled = SavedAim.Enabled == true,
-    Key = keyFrom(SavedAim.Key, Enum.KeyCode.E),
+    Key = bindFrom(SavedAim.Key, Enum.KeyCode.E),
     Holding = false,
     FOV = tonumber(SavedAim.FOV) or 120,
     ShowFOV = SavedAim.ShowFOV ~= false,
@@ -170,7 +199,7 @@ local function snapshot()
     local menuKey = Settings.MenuKey
     if Library and Library.Flags and Library.Flags.Midnight_MenuKey then menuKey = Library.Flags.Midnight_MenuKey end
     return {
-        Aim = { Enabled = Aim.Enabled, Key = keyName(Aim.Key), FOV = Aim.FOV, ShowFOV = Aim.ShowFOV, Visible = Aim.Visible, TeamCheck = Aim.TeamCheck, Part = Aim.Part, Smooth = Aim.Smooth, Sticky = Aim.Sticky },
+        Aim = { Enabled = Aim.Enabled, Key = bindName(Aim.Key), FOV = Aim.FOV, ShowFOV = Aim.ShowFOV, Visible = Aim.Visible, TeamCheck = Aim.TeamCheck, Part = Aim.Part, Smooth = Aim.Smooth, Sticky = Aim.Sticky },
         Esp = {
             Enabled = Esp.Enabled, Corners = Esp.Corners, Fill = Esp.Fill, Health = Esp.Health, HeadDot = Esp.HeadDot,
             Skeleton = Esp.Skeleton, Tracers = Esp.Tracers, Labels = Esp.Labels, VisibleRed = Esp.VisibleRed,
@@ -505,11 +534,16 @@ Players.PlayerRemoving:Connect(function(plr)
     if Aim.StickyTarget == plr then Aim.StickyTarget = nil end
 end)
 UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Aim.Key then Aim.Holding = true if not Aim.Sticky then Aim.StickyTarget = nil end end
+    if not bindMatch(input, Aim.Key) then return end
+    if gpe and not isMouseBind(Aim.Key) then return end
+    Aim.Holding = true
+    if not Aim.Sticky then Aim.StickyTarget = nil end
 end)
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Aim.Key then Aim.Holding = false Aim.ActiveTarget = nil Aim.StickyTarget = nil end
+    if not bindMatch(input, Aim.Key) then return end
+    Aim.Holding = false
+    Aim.ActiveTarget = nil
+    Aim.StickyTarget = nil
 end)
 local function renderFrame()
     Camera = workspace.CurrentCamera
