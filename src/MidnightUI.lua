@@ -29,6 +29,9 @@
 		local Tab  = Window:AddTab("Exploits")
 		local Page = Tab:AddPage("Player")
 
+		-- Settings is always pinned last (right). Add your own rows via Window.Settings:
+		-- Window.Settings.Right:AddButton({ Text = "Save Config", Callback = save })
+
 		Page.Left:AddToggle({ Text = "Option A", Flag = "OptionA", Default = true,
 			Callback = function(v) print("OptionA ->", v) end })
 
@@ -74,6 +77,33 @@ Library.Theme = {
 }
 
 local T = Library.Theme
+
+local SCHEMES = {
+	Midnight = {
+		Accent      = Color3.fromRGB(104, 100, 214),
+		AccentHover = Color3.fromRGB(118, 114, 226),
+		AccentDim   = Color3.fromRGB(86, 82, 182),
+		Knob        = Color3.fromRGB(158, 155, 235),
+	},
+	Crimson = {
+		Accent      = Color3.fromRGB(214, 72, 88),
+		AccentHover = Color3.fromRGB(230, 88, 104),
+		AccentDim   = Color3.fromRGB(178, 56, 72),
+		Knob        = Color3.fromRGB(235, 140, 150),
+	},
+	Emerald = {
+		Accent      = Color3.fromRGB(72, 190, 130),
+		AccentHover = Color3.fromRGB(88, 206, 146),
+		AccentDim   = Color3.fromRGB(56, 154, 104),
+		Knob        = Color3.fromRGB(140, 220, 175),
+	},
+	Amber = {
+		Accent      = Color3.fromRGB(214, 165, 72),
+		AccentHover = Color3.fromRGB(230, 180, 88),
+		AccentDim   = Color3.fromRGB(178, 132, 56),
+		Knob        = Color3.fromRGB(235, 200, 130),
+	},
+}
 
 --==========================================================================
 -- small helpers
@@ -1024,7 +1054,18 @@ end
 local Window = {}
 Window.__index = Window
 
-function Window:AddTab(name)
+function Window:_allTabEntries()
+	local entries = {}
+	for _, entry in ipairs(self._tabs) do
+		table.insert(entries, entry)
+	end
+	if self._settingsEntry then
+		table.insert(entries, self._settingsEntry)
+	end
+	return entries
+end
+
+function Window:_buildTab(name)
 	local holder = new("Frame", {
 		Name                   = "Tab_" .. tostring(name),
 		BackgroundTransparency = 1,
@@ -1058,7 +1099,7 @@ function Window:AddTab(name)
 		Parent                 = holder,
 	})
 
-	local tab = setmetatable({
+	return setmetatable({
 		Name       = name,
 		Window     = self,
 		Frame      = holder,
@@ -1067,26 +1108,12 @@ function Window:AddTab(name)
 		PageHolder = pageHolder,
 		_pages     = {},
 	}, Tab)
+end
 
-	local button = new("TextButton", {
-		BackgroundColor3 = T.Element,
-		BorderSizePixel  = 0,
-		AutoButtonColor  = false,
-		Font             = Enum.Font.Gotham,
-		Text             = name,
-		TextSize         = 12,
-		TextColor3       = T.SubText,
-		Size             = UDim2.fromScale(1, 1),
-		LayoutOrder      = #self._tabs + 1,
-		Parent           = self.TabBar,
-	})
-	corner(3, button)
-	stroke(T.Border, button)
-
-	local entry = { Tab = tab, Button = button }
-
+function Window:_wireTabButton(entry)
+	local button = entry.Button
 	button.MouseButton1Click:Connect(function()
-		self:SelectTab(name)
+		self:_selectTab(entry)
 	end)
 	button.MouseEnter:Connect(function()
 		if self._currentTab ~= entry then
@@ -1098,11 +1125,37 @@ function Window:AddTab(name)
 			tween(button, { BackgroundColor3 = T.Element })
 		end
 	end)
+end
+
+function Window:AddTab(name)
+	if name == "Settings" then
+		warn("MidnightUI: 'Settings' is reserved — use Window.Settings to add settings controls.")
+		return self._settingsEntry and self._settingsEntry.Tab
+	end
+
+	local tab = self:_buildTab(name)
+	local button = new("TextButton", {
+		BackgroundColor3 = T.Element,
+		BorderSizePixel  = 0,
+		AutoButtonColor  = false,
+		Font             = Enum.Font.Gotham,
+		Text             = name,
+		TextSize         = 12,
+		TextColor3       = T.SubText,
+		Size             = UDim2.fromScale(1, 1),
+		LayoutOrder      = #self._tabs + 1,
+		Parent           = self._tabBarMain,
+	})
+	corner(3, button)
+	stroke(T.Border, button)
+
+	local entry = { Tab = tab, Button = button }
+	self:_wireTabButton(entry)
 
 	table.insert(self._tabs, entry)
 	self:_layoutTabs()
 
-	if #self._tabs == 1 then
+	if #self._tabs == 1 and not self._currentTab then
 		self:_selectTab(entry)
 	end
 
@@ -1121,7 +1174,7 @@ function Window:_layoutTabs()
 end
 
 function Window:_selectTab(entry)
-	for _, other in ipairs(self._tabs) do
+	for _, other in ipairs(self:_allTabEntries()) do
 		local active = (other == entry)
 		other.Tab.Frame.Visible = active
 		tween(other.Button, {
@@ -1133,12 +1186,111 @@ function Window:_selectTab(entry)
 end
 
 function Window:SelectTab(name)
+	if name == "Settings" and self._settingsEntry then
+		self:_selectTab(self._settingsEntry)
+		return
+	end
 	for _, entry in ipairs(self._tabs) do
 		if entry.Tab.Name == name then
 			self:_selectTab(entry)
 			return
 		end
 	end
+end
+
+function Window:_refreshChrome()
+	if self._currentTab then
+		self:_selectTab(self._currentTab)
+	end
+end
+
+function Window:ApplyScheme(name)
+	local scheme = SCHEMES[name]
+	if not scheme then
+		return
+	end
+	for key, value in pairs(scheme) do
+		T[key] = value
+		Library.Theme[key] = value
+	end
+	self._activeScheme = name
+	self:_refreshChrome()
+end
+
+function Window:SetToggleKey(keyCode)
+	if self._toggleConnection then
+		self._toggleConnection:Disconnect()
+		self._toggleConnection = nil
+	end
+	self._toggleKey = keyCode
+	if keyCode and keyCode ~= false then
+		self._toggleConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+			if gameProcessed then
+				return
+			end
+			if input.UserInputType == Enum.UserInputType.Keyboard
+				and input.KeyCode == self._toggleKey then
+				self:Toggle()
+			end
+		end)
+	end
+end
+
+function Window:_addSettingsTab(options)
+	local tab = self:_buildTab("Settings")
+	local button = new("TextButton", {
+		BackgroundColor3 = T.Element,
+		BorderSizePixel  = 0,
+		AutoButtonColor  = false,
+		Font             = Enum.Font.Gotham,
+		Text             = "Settings",
+		TextSize         = 12,
+		TextColor3       = T.SubText,
+		Size             = UDim2.fromScale(1, 1),
+		Parent           = self._settingsSlot,
+	})
+	corner(3, button)
+	stroke(T.Border, button)
+
+	local entry = { Tab = tab, Button = button, Pinned = true }
+	self:_wireTabButton(entry)
+	self._settingsEntry = entry
+
+	local page = tab:AddPage(nil)
+	self.Settings = page
+
+	page.Left:AddLabel("Menu")
+	page.Left:AddKeybind({
+		Text    = "Toggle Menu",
+		Default = self._toggleKey or Enum.KeyCode.RightShift,
+		Flag    = "Midnight_MenuKey",
+		Callback = function(keyCode)
+			self:SetToggleKey(keyCode)
+		end,
+	})
+
+	page.Left:AddDivider()
+	page.Left:AddLabel("Appearance")
+	page.Left:AddDropdown({
+		Text    = "Color Scheme",
+		Options = { "Midnight", "Crimson", "Emerald", "Amber" },
+		Default = self._activeScheme or "Midnight",
+		Flag    = "Midnight_Scheme",
+		Callback = function(value)
+			self:ApplyScheme(value)
+		end,
+	})
+
+	page.Right:AddLabel("Session")
+	page.Right:AddButton({
+		Text = "Unload",
+		Callback = function()
+			if options.OnUnload then
+				options.OnUnload()
+			end
+			self:Destroy()
+		end,
+	})
 end
 
 function Window:SetVisible(state)
@@ -1150,6 +1302,16 @@ function Window:Toggle()
 end
 
 function Window:Destroy()
+	if self._toggleConnection then
+		self._toggleConnection:Disconnect()
+		self._toggleConnection = nil
+	end
+	for index, window in ipairs(Library.Windows) do
+		if window == self then
+			table.remove(Library.Windows, index)
+			break
+		end
+	end
 	self.Gui:Destroy()
 end
 
@@ -1214,6 +1376,9 @@ function Library:CreateWindow(options)
 	})
 
 	-- top tab row ---------------------------------------------------------
+	local settingsWidth = 64
+	local tabGap = 5
+
 	local tabBar = new("Frame", {
 		Name                   = "TabBar",
 		BackgroundTransparency = 1,
@@ -1221,7 +1386,23 @@ function Library:CreateWindow(options)
 		Size                   = UDim2.new(1, -16, 0, 24),
 		Parent                 = root,
 	})
-	listLayout(tabBar, 5, true)
+
+	local tabBarMain = new("Frame", {
+		Name                   = "TabBarMain",
+		BackgroundTransparency = 1,
+		Size                   = UDim2.new(1, -(settingsWidth + tabGap), 1, 0),
+		Parent                 = tabBar,
+	})
+	listLayout(tabBarMain, tabGap, true)
+
+	local settingsSlot = new("Frame", {
+		Name                   = "SettingsSlot",
+		BackgroundTransparency = 1,
+		AnchorPoint            = Vector2.new(1, 0),
+		Position               = UDim2.new(1, 0, 0, 0),
+		Size                   = UDim2.fromOffset(settingsWidth, 24),
+		Parent                 = tabBar,
+	})
 
 	-- body ----------------------------------------------------------------
 	local body = new("Frame", {
@@ -1233,12 +1414,15 @@ function Library:CreateWindow(options)
 	})
 
 	local window = setmetatable({
-		Gui      = gui,
-		Root     = root,
-		TitleBar = titleBar,
-		TabBar   = tabBar,
-		Body     = body,
-		_tabs    = {},
+		Gui           = gui,
+		Root          = root,
+		TitleBar      = titleBar,
+		TabBar        = tabBar,
+		_tabBarMain   = tabBarMain,
+		_settingsSlot = settingsSlot,
+		Body          = body,
+		_tabs         = {},
+		_activeScheme = "Midnight",
 	}, Window)
 
 	-- dragging ------------------------------------------------------------
@@ -1277,15 +1461,16 @@ function Library:CreateWindow(options)
 	local toggleKey = options.ToggleKey
 	if toggleKey ~= false then
 		toggleKey = toggleKey or Enum.KeyCode.RightShift
-		UserInputService.InputBegan:Connect(function(input, gameProcessed)
-			if gameProcessed then
-				return
-			end
-			if input.UserInputType == Enum.UserInputType.Keyboard
-				and input.KeyCode == toggleKey then
-				window:Toggle()
-			end
-		end)
+	end
+	window._toggleKey = toggleKey
+	window:SetToggleKey(toggleKey)
+
+	if options.Scheme and SCHEMES[options.Scheme] then
+		window:ApplyScheme(options.Scheme)
+	end
+
+	if options.SettingsTab ~= false then
+		window:_addSettingsTab(options)
 	end
 
 	table.insert(Library.Windows, window)

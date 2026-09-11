@@ -169,22 +169,12 @@ developer.Right:AddDropdown({ Text = "Dropdown (caption on top)", LabelPosition 
 developer.Bottom:AddDropdown({ Text = "Caption on the right", Options = { "Alpha", "Beta", "Gamma" }, Callback = log("DropdownRight") })
 
 --==========================================================================
--- Tab 4 — Misc   (demo content)
+-- Settings tab (built-in, always pinned right)
 --==========================================================================
 
-local misc     = Window:AddTab("Misc")
-local miscMenu = misc:AddPage("Menu")
-
-miscMenu.Left:AddToggle({ Text = "Show Watermark", Flag = "Watermark", Default = true, Callback = log("Watermark") })
-miscMenu.Left:AddToggle({ Text = "Show Keybinds",  Flag = "ShowBinds", Callback = log("ShowBinds") })
-miscMenu.Right:AddKeybind({ Text = "Menu Key", Default = Enum.KeyCode.RightShift, Flag = "MenuKey", Callback = log("MenuKey") })
-miscMenu.Right:AddDropdown({ Text = "Theme", LabelPosition = "Top",
-	Options = { "Midnight", "Graphite", "Ink" }, Flag = "Theme", Callback = log("Theme") })
-miscMenu.Bottom:AddButton({ Text = "Unload UI", Width = 110, Callback = function()
-	Library:Destroy()
-end })
-
-misc:AddPage("Config")
+Window.Settings.Left:AddToggle({ Text = "Show Watermark", Flag = "Watermark", Default = true, Callback = log("Watermark") })
+Window.Settings.Left:AddToggle({ Text = "Show Keybinds",  Flag = "ShowBinds", Callback = log("ShowBinds") })
+Window.Settings.Right:AddButton({ Text = "Save Config", Callback = function() print("[UI] Save Config clicked") end })
 
 --==========================================================================
 -- open on the page from the screenshot

@@ -96,15 +96,28 @@ trivial.
 Library:CreateWindow({
     Title, Size, Position,      -- UDim2s; Position defaults to centred
     ToggleKey,                  -- Enum.KeyCode, or false to disable the hotkey
+    Scheme,                     -- "Midnight" | "Crimson" | "Emerald" | "Amber"
+    OnUnload,                   -- callback when the built-in Unload button is pressed
+    SettingsTab,                -- false to hide the pinned Settings tab (default true)
     DisplayOrder, Name,
 })  --> Window
 ```
 
+Every window gets a **Settings** tab pinned on the far right. It ships with
+menu toggle keybind, colour-scheme picker, and an Unload button. Add your own
+rows through `Window.Settings` (same `.Left` / `.Right` / `.Bottom` containers
+as any page).
+
+```lua
+Window.Settings.Right:AddButton({ Text = "Save Config", Callback = save })
+```
+
 | Object | Methods |
 |---|---|
-| `Window` | `:AddTab(name)` `:SelectTab(name)` `:SetVisible(bool)` `:Toggle()` `:Destroy()` |
+| `Window` | `:AddTab(name)` `:SelectTab(name)` `:SetToggleKey(key)` `:ApplyScheme(name)` `:SetVisible(bool)` `:Toggle()` `:Destroy()` |
 | `Tab` | `:AddPage(name)` `:SelectPage(name)` — pass `nil` as the name to hide the sub-tab row |
 | `Page` | `.Left` `.Right` `.Bottom` (containers) |
+| `Window.Settings` | Built-in settings page containers (always last tab) |
 | `Library` | `.Flags` `.Theme` `.Windows` `:Destroy()` |
 
 Containers accept:
@@ -138,7 +151,11 @@ Keybind capture: click the bind button, then press any key. **Esc** cancels,
 
 ## Theme
 
-Edit `Library.Theme` **before** calling `CreateWindow`:
+Built-in schemes: `Midnight`, `Crimson`, `Emerald`, `Amber`. Pick one at
+creation with `Scheme = "Crimson"`, change it later from the Settings tab, or
+call `Window:ApplyScheme("Emerald")` from code.
+
+Edit `Library.Theme` **before** calling `CreateWindow` for full manual control:
 
 ```lua
 Library.Theme.Accent     = Color3.fromRGB(104, 100, 214)   -- the purple
