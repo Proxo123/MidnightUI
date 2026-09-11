@@ -224,9 +224,21 @@ local function persist() saveConfig(snapshot()) end
 
 local ACCENT_FALLBACK = Color3.fromRGB(104, 100, 214)
 local renderErrAt = 0
-local espTick = 0
-local ESP_RATE = 1 / 30
+local radarTick = 0
+local RADAR_RATE = 1 / 30
 local VIS_TTL = 0.3
+local BOUNDS_CORNERS = {
+    Vector3.new(-1, -1, -1), Vector3.new(-1, -1, 1), Vector3.new(-1, 1, -1), Vector3.new(-1, 1, 1),
+    Vector3.new(1, -1, -1), Vector3.new(1, -1, 1), Vector3.new(1, 1, -1), Vector3.new(1, 1, 1),
+}
+local BOUNDS_PARTS = {
+    "HeadHB", "Head", "FakeHead",
+    "UpperTorso", "Torso", "LowerTorso",
+    "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
+    "LeftHand", "RightHand", "Left Arm", "Right Arm",
+    "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
+    "LeftFoot", "RightFoot", "Left Leg", "Right Leg",
+}
 local visCache = {}
 local rayFilterDirty = true
 local LibraryRef
@@ -483,17 +495,28 @@ end
 local function healthColor(ratio) return Color3.fromRGB(255 - math.floor(200 * ratio), math.floor(220 * ratio + 35), 70) end
 local function getBounds(char)
     if not char then return nil end
-    local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead")
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not head or not root then return nil end
-    local h = Camera:WorldToViewportPoint(head.Position)
-    local r = Camera:WorldToViewportPoint(root.Position)
-    if h.Z <= 0 or r.Z <= 0 then return nil end
-    local top = math.min(h.Y, r.Y) - 18
-    local bottom = math.max(h.Y, r.Y) + 28
-    local cx = (h.X + r.X) * 0.5
-    local hw = math.max(math.abs(h.X - r.X) * 0.5 + 36, 28)
-    return cx - hw, top, cx + hw, bottom
+    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+    local ok = false
+    for i = 1, #BOUNDS_PARTS do
+        local part = char:FindFirstChild(BOUNDS_PARTS[i])
+        if part and part:IsA("BasePart") then
+            local cf, sz = part.CFrame, part.Size * 0.5
+            for j = 1, #BOUNDS_CORNERS do
+                local off = BOUNDS_CORNERS[j]
+                local wp = cf:PointToWorldSpace(Vector3.new(off.X * sz.X, off.Y * sz.Y, off.Z * sz.Z))
+                local sp = Camera:WorldToViewportPoint(wp)
+                if sp.Z > 0 then
+                    ok = true
+                    if sp.X < minX then minX = sp.X end
+                    if sp.Y < minY then minY = sp.Y end
+                    if sp.X > maxX then maxX = sp.X end
+                    if sp.Y > maxY then maxY = sp.Y end
+                end
+            end
+        end
+    end
+    if not ok then return nil end
+    return minX, minY, maxX, maxY
 end
 local function setLine(line, a, b, vis, col, thick, alpha) line.Visible = vis if not vis then return end line.From = a line.To = b line.Color = col line.Thickness = thick line.Transparency = alpha end
 local function drawCorners(shadow, main, x, y, w, h, col)
@@ -732,8 +755,6 @@ local function renderFrame()
         end
     end
     local now = os.clock()
-    if now - espTick < ESP_RATE then return end
-    espTick = now
     local camPos = Camera.CFrame.Position
     if Esp.Enabled then
         for i = 1, #espPlayers do
@@ -750,10 +771,13 @@ local function renderFrame()
     else
         for _, obj in pairs(Esp.Objects) do hideEsp(obj) end
     end
-    local okRadar, errRadar = pcall(updateRadar, accent)
-    if not okRadar and now - renderErrAt > 2 then
-        renderErrAt = now
-        warn("[Midnight] radar error:", errRadar)
+    if now - radarTick >= RADAR_RATE then
+        radarTick = now
+        local okRadar, errRadar = pcall(updateRadar, accent)
+        if not okRadar and now - renderErrAt > 2 then
+            renderErrAt = now
+            warn("[Midnight] radar error:", errRadar)
+        end
     end
 end
 
