@@ -80,6 +80,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local CONFIG_PATH = "MidnightInternal.json"
@@ -140,6 +141,7 @@ local function saveConfig(payload) if writefile then pcall(function() writefile(
 local Saved = loadConfig() or {}
 local SavedAim = Saved.Aim or {}
 local SavedEsp = Saved.Esp or {}
+local SavedExploits = Saved.Exploits or {}
 local SavedSettings = Saved.Settings or {}
 
 local Aim = {
@@ -188,9 +190,15 @@ local Radar = {
     Dots = {},
 }
 
+local Exploits = {
+    NoSpread = SavedExploits.NoSpread == true,
+    NoRecoil = SavedExploits.NoRecoil == true,
+}
+
 local Settings = { MenuKey = keyFrom(SavedSettings.MenuKey, Enum.KeyCode.RightShift), Scheme = SavedSettings.Scheme or "Midnight" }
 
 local Library, Window, conn
+local weaponDefaults, weaponConns
 local FovCircle, RadarBg, RadarRing, RadarCrossH, RadarCrossV, RadarCenter
 
 local function snapshot()
@@ -208,6 +216,7 @@ local function snapshot()
             RadarOffsetY = Radar.OffsetY, RadarCustomX = Radar.CustomX, RadarCustomY = Radar.CustomY,
             RadarBgAlpha = Radar.BgAlpha, RadarCrosshair = Radar.Crosshair, RadarDotSize = Radar.DotSize,
         },
+        Exploits = { NoSpread = Exploits.NoSpread, NoRecoil = Exploits.NoRecoil },
         Settings = { MenuKey = keyName(menuKey), Scheme = scheme },
     }
 end
@@ -215,6 +224,7 @@ local function persist() saveConfig(snapshot()) end
 
 local ACCENT_FALLBACK = Color3.fromRGB(104, 100, 214)
 local renderErrAt = 0
+local weaponTick = 0
 local LibraryRef
 
 local function themeAccent()
@@ -280,6 +290,90 @@ OverlayPage.Right:AddSlider({ Text = "Offset Y", Min = -150, Max = 150, Default 
 OverlayPage.Bottom:AddSlider({ Text = "Custom X %", Min = 2, Max = 98, Default = Radar.CustomX, Decimals = 0, ShowValue = true, Flag = "EspRadarCustX", Callback = function(v) Radar.CustomX = v persist() end })
 OverlayPage.Bottom:AddSlider({ Text = "Custom Y %", Min = 2, Max = 98, Default = Radar.CustomY, Decimals = 0, ShowValue = true, Flag = "EspRadarCustY", Callback = function(v) Radar.CustomY = v persist() end })
 OverlayPage.Bottom:AddSlider({ Text = "Background Alpha", Min = 0.4, Max = 0.95, Default = Radar.BgAlpha, Decimals = 2, ShowValue = true, Flag = "EspRadarAlpha", Callback = function(v) Radar.BgAlpha = v persist() end })
+
+local ExploitTab = Window:AddTab("Exploits")
+local ExploitPage = ExploitTab:AddPage("Weapons")
+ExploitPage.Left:AddToggle({ Text = "No Spread", Flag = "ExpNoSpread", Default = Exploits.NoSpread, Callback = function(v) Exploits.NoSpread = v applyWeaponExploits() persist() end })
+ExploitPage.Left:AddToggle({ Text = "No Recoil", Flag = "ExpNoRecoil", Default = Exploits.NoRecoil, Callback = function(v) Exploits.NoRecoil = v applyWeaponExploits() persist() end })
+ExploitPage.Right:AddLabel("Patches ReplicatedStorage.Weapons")
+ExploitPage.Right:AddLabel("Spread, MaxSpread, SpreadRecovery")
+ExploitPage.Right:AddLabel("RecoilControl on equipped guns")
+
+local SPREAD_VALUES = { Spread = true, MaxSpread = true, ["Spread%"] = true }
+local RECOIL_VALUES = { RecoilControl = true, Recoil = true, Kick = true }
+weaponDefaults = {}
+weaponConns = {}
+
+local function rememberWeaponValue(val)
+    if weaponDefaults[val] == nil then weaponDefaults[val] = val.Value end
+end
+
+local function patchWeaponValue(val)
+    local name = val.Name
+    if SPREAD_VALUES[name] or name == "SpreadRecovery" then
+        rememberWeaponValue(val)
+        if Exploits.NoSpread then
+            val.Value = name == "SpreadRecovery" and 999 or 0
+        else
+            val.Value = weaponDefaults[val]
+        end
+        return
+    end
+    if RECOIL_VALUES[name] then
+        rememberWeaponValue(val)
+        if Exploits.NoRecoil then
+            val.Value = 0
+        else
+            val.Value = weaponDefaults[val]
+        end
+    end
+end
+
+local function patchWeaponRoot(root)
+    if not root then return end
+    for _, inst in ipairs(root:GetDescendants()) do
+        if inst:IsA("ValueBase") and (SPREAD_VALUES[inst.Name] or inst.Name == "SpreadRecovery" or RECOIL_VALUES[inst.Name]) then
+            patchWeaponValue(inst)
+        end
+    end
+end
+
+function applyWeaponExploits()
+    local weapons = ReplicatedStorage:FindFirstChild("Weapons")
+    if weapons then
+        for _, weapon in ipairs(weapons:GetChildren()) do patchWeaponRoot(weapon) end
+    end
+    local char = LocalPlayer.Character
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") then patchWeaponRoot(item) end
+        end
+    end
+end
+
+local function hookWeaponFolder(folder)
+    if not folder then return end
+    table.insert(weaponConns, folder.ChildAdded:Connect(function(child) task.defer(function() patchWeaponRoot(child) end) end))
+    table.insert(weaponConns, folder.DescendantAdded:Connect(function(inst)
+        if inst:IsA("ValueBase") and (SPREAD_VALUES[inst.Name] or inst.Name == "SpreadRecovery" or RECOIL_VALUES[inst.Name]) then
+            task.defer(function() patchWeaponValue(inst) end)
+        end
+    end))
+end
+
+local weaponsFolder = ReplicatedStorage:FindFirstChild("Weapons") or ReplicatedStorage:WaitForChild("Weapons", 10)
+hookWeaponFolder(weaponsFolder)
+table.insert(weaponConns, LocalPlayer.CharacterAdded:Connect(function(char)
+    table.insert(weaponConns, char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then task.defer(function() patchWeaponRoot(child) end) end
+    end))
+end))
+if LocalPlayer.Character then
+    table.insert(weaponConns, LocalPlayer.Character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then task.defer(function() patchWeaponRoot(child) end) end
+    end))
+end
+applyWeaponExploits()
 
 local function newDraw(kind, props) local d = Drawing.new(kind) for k, v in pairs(props) do d[k] = v end return d end
 local function newLines(n, thick, col) local t = {} for i = 1, n do t[i] = newDraw("Line", { Thickness = thick, Visible = false, Transparency = 1, Color = col }) end return t end
@@ -365,6 +459,7 @@ local SKELETON_R6 = {
     {"Head","Torso"},{"Torso","HumanoidRootPart"},
     {"Torso","Left Arm"},{"Torso","Right Arm"},{"Torso","Left Leg"},{"Torso","Right Leg"},
 }
+local function worldPoint(part) if not part then return nil end local sp = Camera:WorldToViewportPoint(part.Position) if sp.Z <= 0 then return nil end return Vector2.new(sp.X, sp.Y) end
 local function findBone(char, name)
     if name == "Head" then return char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead") end
     return char:FindFirstChild(name)
@@ -382,7 +477,6 @@ end
 local function makeEspObj() return { Shadow = newLines(8,3.2,OUTLINE), Corners = newLines(8,1.6,Color3.new(1,1,1)), Fill = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.82,Visible=false,Color=OUTLINE}), HealthBg = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.45,Visible=false,Color=OUTLINE}), HealthFill = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.15,Visible=false,Color=Color3.fromRGB(80,220,120)}), HeadRing = newDraw("Circle",{Filled=false,Thickness=1.4,NumSides=24,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), HeadDot = newDraw("Circle",{Filled=true,Thickness=0,NumSides=16,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), Name = newDraw("Text",{Size=14,Center=true,Outline=true,Font=2,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), Sub = newDraw("Text",{Size=12,Center=true,Outline=true,Font=2,Transparency=1,Visible=false,Color=Color3.fromRGB(185,185,200)}), Tracer = newDraw("Line",{Thickness=1.2,Transparency=0.55,Visible=false,Color=Color3.new(1,1,1)}), Bones = newLines(20,1.1,Color3.new(1,1,1)) } end
 local function hideEsp(obj) hideLines(obj.Shadow) hideLines(obj.Corners) hideLines(obj.Bones) obj.Fill.Visible=false obj.HealthBg.Visible=false obj.HealthFill.Visible=false obj.HeadRing.Visible=false obj.HeadDot.Visible=false obj.Name.Visible=false obj.Sub.Visible=false obj.Tracer.Visible=false end
 local function destroyEsp(obj) for _, v in pairs(obj) do if type(v)=="table" then for _, d in ipairs(v) do pcall(function() d:Remove() end) end else pcall(function() v:Remove() end) end end end
-local function worldPoint(part) if not part then return nil end local sp = Camera:WorldToViewportPoint(part.Position) if sp.Z <= 0 then return nil end return Vector2.new(sp.X, sp.Y) end
 local function validAimTarget(plr)
     if plr == LocalPlayer then return false end
     if not alive(plr) then return false end
@@ -589,6 +683,13 @@ local function renderFrame()
             warn("[Midnight] radar error:", errRadar)
         end
     end
+    if Exploits.NoSpread or Exploits.NoRecoil then
+        local now = os.clock()
+        if now - weaponTick > 0.15 then
+            weaponTick = now
+            pcall(applyWeaponExploits)
+        end
+    end
 end
 
 conn = RunService.RenderStepped:Connect(function()
@@ -613,11 +714,12 @@ function Controller:Destroy(skipLibrary)
     for _, obj in pairs(Esp.Objects) do destroyEsp(obj) end
     Esp.Objects = {}
     Aim.ActiveTarget = nil Aim.StickyTarget = nil
+    if weaponConns then for _, c in ipairs(weaponConns) do pcall(function() c:Disconnect() end) end weaponConns = {} end
     if not skipLibrary and Library then Library:Destroy() end
     getgenv().MidnightCheat = nil
 end
 getgenv().MidnightCheat = Controller
-getgenv().MidnightState = { Aim = Aim, Esp = Esp, Radar = Radar }
+getgenv().MidnightState = { Aim = Aim, Esp = Esp, Radar = Radar, Exploits = Exploits }
 persist()
 print("[Midnight] loaded for " .. gameName)
 print("[Midnight] esp=" .. tostring(Esp.Enabled) .. " radar=" .. tostring(Radar.Enabled) .. " players=" .. tostring(#Players:GetPlayers() - 1))
