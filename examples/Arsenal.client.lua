@@ -115,10 +115,14 @@ end
 local function bindFrom(name, fallback)
     fallback = fallback or Enum.KeyCode.E
     if type(name) ~= "string" or name == "" then return fallback end
-    local resolved = BIND_ALIASES[name] or name
-    local mouse = Enum.UserInputType[resolved]
-    if mouse and mouse.EnumType == Enum.UserInputType then return mouse end
-    return Enum.KeyCode[resolved] or fallback
+    local alias = BIND_ALIASES[name]
+    if alias then return Enum.UserInputType[alias] end
+    if name == "MouseButton1" or name == "MouseButton2" or name == "MouseButton3" then
+        return Enum.UserInputType[name]
+    end
+    local key = Enum.KeyCode[name]
+    if key then return key end
+    return fallback
 end
 local function isMouseBind(bind)
     return typeof(bind) == "EnumItem" and bind.EnumType == Enum.UserInputType
