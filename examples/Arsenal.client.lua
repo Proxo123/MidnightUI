@@ -88,10 +88,6 @@ local ESP_DEFAULT = Color3.fromRGB(238, 238, 245)
 local ESP_VISIBLE = Color3.fromRGB(255, 72, 72)
 local OUTLINE = Color3.fromRGB(8, 8, 12)
 local RADAR_POSITIONS = { "Top Left", "Top Right", "Bottom Left", "Bottom Right", "Top Center", "Bottom Center", "Custom" }
-local PART_CORNERS = {
-    Vector3.new(-1,-1,-1), Vector3.new(-1,-1,1), Vector3.new(-1,1,-1), Vector3.new(-1,1,1),
-    Vector3.new(1,-1,-1), Vector3.new(1,-1,1), Vector3.new(1,1,-1), Vector3.new(1,1,1),
-}
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -228,7 +224,11 @@ local function persist() saveConfig(snapshot()) end
 
 local ACCENT_FALLBACK = Color3.fromRGB(104, 100, 214)
 local renderErrAt = 0
-local weaponTick = 0
+local espTick = 0
+local ESP_RATE = 1 / 30
+local VIS_TTL = 0.3
+local visCache = {}
+local rayFilterDirty = true
 local LibraryRef
 
 local function themeAccent()
@@ -303,81 +303,121 @@ ExploitPage.Right:AddLabel("Patches ReplicatedStorage.Weapons")
 ExploitPage.Right:AddLabel("Spread, MaxSpread, SpreadRecovery")
 ExploitPage.Right:AddLabel("RecoilControl on equipped guns")
 
-local SPREAD_VALUES = { Spread = true, MaxSpread = true, ["Spread%"] = true }
-local RECOIL_VALUES = { RecoilControl = true, Recoil = true, Kick = true }
 weaponDefaults = {}
 weaponConns = {}
+local toolHooks = {}
+local templatesPatched = false
 
 local function rememberWeaponValue(val)
-    if weaponDefaults[val] == nil then weaponDefaults[val] = val.Value end
+    if val and weaponDefaults[val] == nil then weaponDefaults[val] = val.Value end
 end
 
-local function patchWeaponValue(val)
-    local name = val.Name
-    if SPREAD_VALUES[name] or name == "SpreadRecovery" then
-        rememberWeaponValue(val)
-        if Exploits.NoSpread then
-            val.Value = name == "SpreadRecovery" and 999 or 0
-        else
-            val.Value = weaponDefaults[val]
-        end
-        return
+local function collectToolValues(tool)
+    return {
+        spread = tool:FindFirstChild("Spread"),
+        maxSpread = tool:FindFirstChild("MaxSpread"),
+        recovery = tool:FindFirstChild("SpreadRecovery"),
+        recoil = tool:FindFirstChild("RecoilControl") or tool:FindFirstChild("Recoil"),
+    }
+end
+
+local function applyToolValues(vals)
+    if not vals then return end
+    if Exploits.NoSpread then
+        if vals.spread then rememberWeaponValue(vals.spread) if vals.spread.Value ~= 0 then vals.spread.Value = 0 end end
+        if vals.maxSpread then rememberWeaponValue(vals.maxSpread) if vals.maxSpread.Value ~= 0 then vals.maxSpread.Value = 0 end end
+        if vals.recovery then rememberWeaponValue(vals.recovery) if vals.recovery.Value ~= 999 then vals.recovery.Value = 999 end end
+    else
+        if vals.spread and weaponDefaults[vals.spread] ~= nil then vals.spread.Value = weaponDefaults[vals.spread] end
+        if vals.maxSpread and weaponDefaults[vals.maxSpread] ~= nil then vals.maxSpread.Value = weaponDefaults[vals.maxSpread] end
+        if vals.recovery and weaponDefaults[vals.recovery] ~= nil then vals.recovery.Value = weaponDefaults[vals.recovery] end
     end
-    if RECOIL_VALUES[name] then
-        rememberWeaponValue(val)
-        if Exploits.NoRecoil then
-            val.Value = 0
-        else
-            val.Value = weaponDefaults[val]
-        end
+    if Exploits.NoRecoil and vals.recoil then
+        rememberWeaponValue(vals.recoil)
+        if vals.recoil.Value ~= 0 then vals.recoil.Value = 0 end
+    elseif vals.recoil and weaponDefaults[vals.recoil] ~= nil then
+        vals.recoil.Value = weaponDefaults[vals.recoil]
     end
 end
 
-local function patchWeaponRoot(root)
-    if not root then return end
-    for _, inst in ipairs(root:GetDescendants()) do
-        if inst:IsA("ValueBase") and (SPREAD_VALUES[inst.Name] or inst.Name == "SpreadRecovery" or RECOIL_VALUES[inst.Name]) then
-            patchWeaponValue(inst)
+local function clearToolHook(tool)
+    local hook = toolHooks[tool]
+    if not hook then return end
+    for _, c in ipairs(hook.conns) do pcall(function() c:Disconnect() end) end
+    toolHooks[tool] = nil
+end
+
+local function hookEquippedTool(tool)
+    if not tool or not tool:IsA("Tool") or toolHooks[tool] then return end
+    local vals = collectToolValues(tool)
+    if not vals.spread and not vals.maxSpread and not vals.recoil and not vals.recovery then return end
+    local conns = {}
+    local refreshAt = 0
+    local function refresh()
+        if Exploits.NoSpread or Exploits.NoRecoil then applyToolValues(vals) end
+    end
+    local function debouncedRefresh()
+        local now = os.clock()
+        if now - refreshAt < 0.05 then return end
+        refreshAt = now
+        refresh()
+    end
+    refresh()
+    for _, val in pairs(vals) do
+        if val then table.insert(conns, val:GetPropertyChangedSignal("Value"):Connect(debouncedRefresh)) end
+    end
+    table.insert(conns, tool.AncestryChanged:Connect(function(_, parent)
+        if not parent then clearToolHook(tool) end
+    end))
+    toolHooks[tool] = { vals = vals, conns = conns }
+end
+
+local function patchWeaponTemplates()
+    if templatesPatched then return end
+    templatesPatched = true
+    task.spawn(function()
+        local folder = ReplicatedStorage:FindFirstChild("Weapons")
+        if not folder then return end
+        local kids = folder:GetChildren()
+        for i, weapon in ipairs(kids) do
+            if Exploits.NoSpread or Exploits.NoRecoil then applyToolValues(collectToolValues(weapon)) end
+            if i % 25 == 0 then task.wait() end
         end
+    end)
+end
+
+local function scanCharacterTools(char)
+    if not char then return end
+    for _, item in ipairs(char:GetChildren()) do
+        if item:IsA("Tool") then hookEquippedTool(item) end
     end
 end
 
 function applyWeaponExploits()
-    local weapons = ReplicatedStorage:FindFirstChild("Weapons")
-    if weapons then
-        for _, weapon in ipairs(weapons:GetChildren()) do patchWeaponRoot(weapon) end
-    end
-    local char = LocalPlayer.Character
-    if char then
-        for _, item in ipairs(char:GetChildren()) do
-            if item:IsA("Tool") then patchWeaponRoot(item) end
+    if Exploits.NoSpread or Exploits.NoRecoil then
+        patchWeaponTemplates()
+        scanCharacterTools(LocalPlayer.Character)
+    else
+        for tool, hook in pairs(toolHooks) do
+            applyToolValues(hook.vals)
+            clearToolHook(tool)
         end
     end
 end
 
-local function hookWeaponFolder(folder)
-    if not folder then return end
-    table.insert(weaponConns, folder.ChildAdded:Connect(function(child) task.defer(function() patchWeaponRoot(child) end) end))
-    table.insert(weaponConns, folder.DescendantAdded:Connect(function(inst)
-        if inst:IsA("ValueBase") and (SPREAD_VALUES[inst.Name] or inst.Name == "SpreadRecovery" or RECOIL_VALUES[inst.Name]) then
-            task.defer(function() patchWeaponValue(inst) end)
-        end
-    end))
-end
-
-local weaponsFolder = ReplicatedStorage:FindFirstChild("Weapons") or ReplicatedStorage:WaitForChild("Weapons", 10)
-hookWeaponFolder(weaponsFolder)
-table.insert(weaponConns, LocalPlayer.CharacterAdded:Connect(function(char)
+local function onCharacterReady(char)
+    scanCharacterTools(char)
     table.insert(weaponConns, char.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then task.defer(function() patchWeaponRoot(child) end) end
+        if child:IsA("Tool") then task.defer(hookEquippedTool, child) end
     end))
-end))
-if LocalPlayer.Character then
-    table.insert(weaponConns, LocalPlayer.Character.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then task.defer(function() patchWeaponRoot(child) end) end
+    table.insert(weaponConns, char.ChildRemoved:Connect(function(child)
+        if child:IsA("Tool") then clearToolHook(child) end
     end))
 end
-applyWeaponExploits()
+
+table.insert(weaponConns, LocalPlayer.CharacterAdded:Connect(onCharacterReady))
+if LocalPlayer.Character then onCharacterReady(LocalPlayer.Character) end
+if Exploits.NoSpread or Exploits.NoRecoil then applyWeaponExploits() end
 
 local function newDraw(kind, props) local d = Drawing.new(kind) for k, v in pairs(props) do d[k] = v end return d end
 local function newLines(n, thick, col) local t = {} for i = 1, n do t[i] = newDraw("Line", { Thickness = thick, Visible = false, Transparency = 1, Color = col }) end return t end
@@ -409,6 +449,8 @@ local function getAimOrigin()
     local m = UserInputService:GetMouseLocation() return Vector2.new(m.X, m.Y)
 end
 local function updateRayFilter()
+    if not rayFilterDirty then return end
+    rayFilterDirty = false
     local ignore = {}
     if LocalPlayer.Character then table.insert(ignore, LocalPlayer.Character) end
     if Camera then table.insert(ignore, Camera) end
@@ -424,26 +466,34 @@ local function isVisible(plr, part)
     if not hit then return true end
     return hit.Instance:IsDescendantOf(char)
 end
-local function espColor(plr)
+local function cachedVisible(plr, part)
+    if not part then return false end
+    local now = os.clock()
+    local c = visCache[plr]
+    if c and now - c.t < VIS_TTL then return c.v end
+    local v = isVisible(plr, part)
+    visCache[plr] = { t = now, v = v }
+    return v
+end
+local function espColor(plr, visPart)
     if Aim.ActiveTarget == plr then return themeAccent() end
-    if Esp.VisibleRed then local part = getPart(plr, "Head") or getRoot(plr) if part and isVisible(plr, part) then return ESP_VISIBLE end end
+    if Esp.VisibleRed and visPart and cachedVisible(plr, visPart) then return ESP_VISIBLE end
     return ESP_DEFAULT
 end
 local function healthColor(ratio) return Color3.fromRGB(255 - math.floor(200 * ratio), math.floor(220 * ratio + 35), 70) end
 local function getBounds(char)
     if not char then return nil end
-    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge local ok = false
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            local cf, sz = part.CFrame, part.Size * 0.5
-            for _, off in ipairs(PART_CORNERS) do
-                local wp = cf:PointToWorldSpace(Vector3.new(off.X * sz.X, off.Y * sz.Y, off.Z * sz.Z))
-                local sp = Camera:WorldToViewportPoint(wp)
-                if sp.Z > 0 then ok = true minX = math.min(minX, sp.X) minY = math.min(minY, sp.Y) maxX = math.max(maxX, sp.X) maxY = math.max(maxY, sp.Y) end
-            end
-        end
-    end
-    if not ok then return nil end return minX, minY, maxX, maxY
+    local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not head or not root then return nil end
+    local h = Camera:WorldToViewportPoint(head.Position)
+    local r = Camera:WorldToViewportPoint(root.Position)
+    if h.Z <= 0 or r.Z <= 0 then return nil end
+    local top = math.min(h.Y, r.Y) - 18
+    local bottom = math.max(h.Y, r.Y) + 28
+    local cx = (h.X + r.X) * 0.5
+    local hw = math.max(math.abs(h.X - r.X) * 0.5 + 36, 28)
+    return cx - hw, top, cx + hw, bottom
 end
 local function setLine(line, a, b, vis, col, thick, alpha) line.Visible = vis if not vis then return end line.From = a line.To = b line.Color = col line.Thickness = thick line.Transparency = alpha end
 local function drawCorners(shadow, main, x, y, w, h, col)
@@ -542,12 +592,19 @@ local function radarOffset(localRoot, targetRoot, radius)
     local scale = radius - 8
     return Vector2.new((localFlat.X / Radar.Range) * scale, (localFlat.Z / Radar.Range) * scale)
 end
+local espPlayers = {}
+local function rebuildEspPlayers()
+    espPlayers = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then table.insert(espPlayers, plr) end
+    end
+end
 local function makeRadarDot() return newDraw("Circle", { Filled = true, Thickness = 0, NumSides = 12, Radius = Radar.DotSize, Transparency = 1, Visible = false, Color = ESP_DEFAULT }) end
 local function hideRadar()
     RadarBg.Visible = false RadarRing.Visible = false RadarCrossH.Visible = false RadarCrossV.Visible = false RadarCenter.Visible = false
     for _, dot in pairs(Radar.Dots) do dot.Visible = false end
 end
-local function updateRadar()
+local function updateRadar(accent)
     if not Radar.Enabled then hideRadar() return end
     local localRoot = getRoot(LocalPlayer)
     if not localRoot then hideRadar() return end
@@ -560,7 +617,7 @@ local function updateRadar()
     RadarRing.Visible = true
     RadarRing.Position = center
     RadarRing.Radius = radius
-    RadarRing.Color = themeAccent()
+    RadarRing.Color = accent
     if Radar.Crosshair then
         RadarCrossH.Visible = true
         RadarCrossH.From = center + Vector2.new(-radius + 6, 0)
@@ -573,46 +630,46 @@ local function updateRadar()
     end
     RadarCenter.Visible = true
     RadarCenter.Position = center
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            if not Radar.Dots[plr] then Radar.Dots[plr] = makeRadarDot() end
-            local dot = Radar.Dots[plr]
+    for i = 1, #espPlayers do
+        local plr = espPlayers[i]
+        if not Radar.Dots[plr] then Radar.Dots[plr] = makeRadarDot() end
+        local dot = Radar.Dots[plr]
             if alive(plr) and (not Esp.TeamCheck or not sameTeam(LocalPlayer, plr)) then
                 local root = getRoot(plr)
                 if root then
                     local offset = radarOffset(localRoot, root, radius)
                     if offset then
-                        local pos = center + offset
                         dot.Visible = true
-                        dot.Position = pos
-                        dot.Color = espColor(plr)
-                        local sz = Radar.DotSize
-                        if Aim.ActiveTarget == plr then sz = sz + 1 end
-                        dot.Radius = sz
+                        dot.Position = center + offset
+                        dot.Color = Aim.ActiveTarget == plr and accent or ESP_DEFAULT
+                        dot.Radius = Radar.DotSize + (Aim.ActiveTarget == plr and 1 or 0)
                     else dot.Visible = false end
                 else dot.Visible = false end
             else dot.Visible = false end
-        end
     end
 end
 local function ensureEspObj(plr)
     if plr == LocalPlayer then return end
     if not Esp.Objects[plr] then Esp.Objects[plr] = makeEspObj() end
 end
-local function updateEsp(plr, obj)
+local function updateEsp(plr, obj, camPos, accent)
     if not Esp.Enabled then hideEsp(obj) return end
     if Esp.TeamCheck and sameTeam(LocalPlayer, plr) then hideEsp(obj) return end
     if not alive(plr) then hideEsp(obj) return end
     local char = getChar(plr) local root = getRoot(plr)
     if not char or not root then hideEsp(obj) return end
-    local hpVal = getHealth(plr) or 0 local maxHp = 100
-    local n = plr:FindFirstChild("NRPBS") if n and n:FindFirstChild("MaxHealth") then maxHp = n.MaxHealth.Value end
-    local dist = (root.Position - Camera.CFrame.Position).Magnitude
-    if dist > Esp.MaxDist then hideEsp(obj) return end
+    local dx, dy, dz = root.Position.X - camPos.X, root.Position.Y - camPos.Y, root.Position.Z - camPos.Z
+    local maxDistSq = Esp.MaxDist * Esp.MaxDist
+    if dx * dx + dy * dy + dz * dz > maxDistSq then hideEsp(obj) return end
     local minX, minY, maxX, maxY = getBounds(char) if not minX then hideEsp(obj) return end
     local pad = 3 minX, minY = minX - pad, minY - pad maxX, maxY = maxX + pad, maxY + pad
     local w, h = maxX - minX, maxY - minY if w < 4 or h < 4 then hideEsp(obj) return end
-    local col = espColor(plr) local ratio = math.clamp(hpVal / math.max(maxHp, 1), 0, 1)
+    local visPart = Esp.VisibleRed and (getPart(plr, "Head") or root)
+    local col = espColor(plr, visPart)
+    local hpVal = getHealth(plr) or 0 local maxHp = 100
+    local n = plr:FindFirstChild("NRPBS") if n and n:FindFirstChild("MaxHealth") then maxHp = n.MaxHealth.Value end
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local ratio = math.clamp(hpVal / math.max(maxHp, 1), 0, 1)
     if Esp.Fill then obj.Fill.Visible=true obj.Fill.Position=Vector2.new(minX,minY) obj.Fill.Size=Vector2.new(w,h) obj.Fill.Color=col obj.Fill.Transparency=0.88 else obj.Fill.Visible=false end
     if Esp.Corners then drawCorners(obj.Shadow,obj.Corners,minX,minY,w,h,col) else hideLines(obj.Shadow) hideLines(obj.Corners) end
     if Esp.Health then local barW,gap=3,5 local bx=minX-gap-barW obj.HealthBg.Visible=true obj.HealthBg.Position=Vector2.new(bx,minY) obj.HealthBg.Size=Vector2.new(barW,h) local fh=math.max(1,h*ratio) obj.HealthFill.Visible=true obj.HealthFill.Color=healthColor(ratio) obj.HealthFill.Position=Vector2.new(bx,minY+h-fh) obj.HealthFill.Size=Vector2.new(barW,fh) else obj.HealthBg.Visible=false obj.HealthFill.Visible=false end
@@ -624,13 +681,19 @@ end
 
 
 for _, plr in ipairs(Players:GetPlayers()) do if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() end end
-Players.PlayerAdded:Connect(function(plr) if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() end end)
+rebuildEspPlayers()
+Players.PlayerAdded:Connect(function(plr)
+    if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() rebuildEspPlayers() end
+end)
 Players.PlayerRemoving:Connect(function(plr)
     local obj = Esp.Objects[plr] if obj then destroyEsp(obj) Esp.Objects[plr] = nil end
     local dot = Radar.Dots[plr] if dot then pcall(function() dot:Remove() end) Radar.Dots[plr] = nil end
+    visCache[plr] = nil
+    rebuildEspPlayers()
     if Aim.ActiveTarget == plr then Aim.ActiveTarget = nil end
     if Aim.StickyTarget == plr then Aim.StickyTarget = nil end
 end)
+LocalPlayer.CharacterAdded:Connect(function() rayFilterDirty = true end)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if not bindMatch(input, Aim.Key) then return end
     if gpe and not isMouseBind(Aim.Key) then return end
@@ -646,7 +709,6 @@ end)
 local function renderFrame()
     Camera = workspace.CurrentCamera
     if not Camera then return end
-    for _, plr in ipairs(Players:GetPlayers()) do ensureEspObj(plr) end
     local origin = getAimOrigin()
     local accent = themeAccent()
     if Aim.ShowFOV and Aim.Enabled then
@@ -669,30 +731,29 @@ local function renderFrame()
             Aim.StickyTarget = nil
         end
     end
-    for plr, obj in pairs(Esp.Objects) do
-        local ok, err = pcall(updateEsp, plr, obj)
-        if not ok then
-            local now = os.clock()
-            if now - renderErrAt > 2 then
-                renderErrAt = now
-                warn("[Midnight] esp error:", plr.Name, err)
+    local now = os.clock()
+    if now - espTick < ESP_RATE then return end
+    espTick = now
+    local camPos = Camera.CFrame.Position
+    if Esp.Enabled then
+        for i = 1, #espPlayers do
+            local plr = espPlayers[i]
+            local obj = Esp.Objects[plr]
+            if obj then
+                local ok, err = pcall(updateEsp, plr, obj, camPos, accent)
+                if not ok and now - renderErrAt > 2 then
+                    renderErrAt = now
+                    warn("[Midnight] esp error:", plr.Name, err)
+                end
             end
         end
+    else
+        for _, obj in pairs(Esp.Objects) do hideEsp(obj) end
     end
-    local okRadar, errRadar = pcall(updateRadar)
-    if not okRadar then
-        local now = os.clock()
-        if now - renderErrAt > 2 then
-            renderErrAt = now
-            warn("[Midnight] radar error:", errRadar)
-        end
-    end
-    if Exploits.NoSpread or Exploits.NoRecoil then
-        local now = os.clock()
-        if now - weaponTick > 0.15 then
-            weaponTick = now
-            pcall(applyWeaponExploits)
-        end
+    local okRadar, errRadar = pcall(updateRadar, accent)
+    if not okRadar and now - renderErrAt > 2 then
+        renderErrAt = now
+        warn("[Midnight] radar error:", errRadar)
     end
 end
 
@@ -719,6 +780,8 @@ function Controller:Destroy(skipLibrary)
     Esp.Objects = {}
     Aim.ActiveTarget = nil Aim.StickyTarget = nil
     if weaponConns then for _, c in ipairs(weaponConns) do pcall(function() c:Disconnect() end) end weaponConns = {} end
+    for tool in pairs(toolHooks) do clearToolHook(tool) end
+    visCache = {}
     if not skipLibrary and Library then Library:Destroy() end
     getgenv().MidnightCheat = nil
 end
