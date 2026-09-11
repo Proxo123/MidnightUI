@@ -57,17 +57,17 @@ local GAME_HOOKS = {
             return hum and hum.Health
         end,
         isAlive = function(plr)
-            local char = plr.Character
+            local char = plr.Character or workspace:FindFirstChild(plr.Name)
             if not char then return false end
-            local root = char:FindFirstChild("HumanoidRootPart")
+            local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
             if not root then return false end
-            if root.Position.Y < 100 then return false end
+            if root.Position.Y < -50 then return false end
             local n = plr:FindFirstChild("NRPBS")
             if n then
                 local under = n:FindFirstChild("Underbelly")
                 if under and under.Value then return false end
                 local h = n:FindFirstChild("Health")
-                if h and h.Value <= 0 then return false end
+                if h and typeof(h.Value) == "number" then return h.Value > 0 end
             end
             local hum = char:FindFirstChildOfClass("Humanoid")
             return hum and hum.Health > 0
@@ -184,7 +184,17 @@ local function snapshot()
 end
 local function persist() saveConfig(snapshot()) end
 
+local ACCENT_FALLBACK = Color3.fromRGB(104, 100, 214)
+local renderErrAt = 0
+local LibraryRef
+
+local function themeAccent()
+    if LibraryRef and LibraryRef.Theme and LibraryRef.Theme.Accent then return LibraryRef.Theme.Accent end
+    return ACCENT_FALLBACK
+end
+
 Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Proxo123/MidnightUI/main/src/MidnightUI.lua"))()
+LibraryRef = Library
 Window = Library:CreateWindow({ Title = "Midnight Internal - " .. gameName, Size = UDim2.fromOffset(520, 470), ToggleKey = Settings.MenuKey, Scheme = Settings.Scheme, OnUnload = function() if getgenv().MidnightCheat then getgenv().MidnightCheat:Destroy(true) end end })
 Window.Settings.Left:AddLabel("Config: " .. CONFIG_PATH)
 Window.Settings.Right:AddButton({ Text = "Save Config", Callback = function() persist() end })
@@ -212,7 +222,7 @@ AimPage.Left:AddToggle({ Text = "Sticky Aim", Flag = "AimSticky", Default = Aim.
 AimPage.Right:AddKeybind({ Text = "Aim Key", Default = Aim.Key, Flag = "AimKey", Callback = function(k) Aim.Key = k persist() end })
 AimPage.Right:AddSlider({ Text = "FOV", Min = 20, Max = 500, Default = Aim.FOV, Decimals = 0, ShowValue = true, Flag = "AimFOV", Callback = function(v) Aim.FOV = v persist() end })
 AimPage.Right:AddSlider({ Text = "Smoothness", Min = 1, Max = 20, Default = Aim.Smooth, Decimals = 1, ShowValue = true, Flag = "AimSmooth", Callback = function(v) Aim.Smooth = v persist() end })
-AimPage.Bottom:AddDropdown({ Text = "Target Part", Options = { "Head", "Torso", "HumanoidRootPart" }, Default = Aim.Part, Flag = "AimPart", Callback = function(v) Aim.Part = v persist() end })
+AimPage.Bottom:AddDropdown({ Text = "Target Part", Options = { "Head", "HeadHB", "Torso", "HumanoidRootPart" }, Default = Aim.Part, Flag = "AimPart", Callback = function(v) Aim.Part = v persist() end })
 
 local EspTab = Window:AddTab("ESP")
 local EspPage = EspTab:AddPage("Visuals")
@@ -245,10 +255,23 @@ OverlayPage.Bottom:AddSlider({ Text = "Background Alpha", Min = 0.4, Max = 0.95,
 local function newDraw(kind, props) local d = Drawing.new(kind) for k, v in pairs(props) do d[k] = v end return d end
 local function newLines(n, thick, col) local t = {} for i = 1, n do t[i] = newDraw("Line", { Thickness = thick, Visible = false, Transparency = 1, Color = col }) end return t end
 local function sameTeam(a, b) if not a.Team or not b.Team then return false end return a.Team == b.Team end
-local function getRoot(plr) local char = plr.Character if not char then return nil end return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart") end
+local function getChar(plr)
+    if not plr then return nil end
+    local char = plr.Character
+    if char and char.Parent then return char end
+    char = workspace:FindFirstChild(plr.Name)
+    if char and char:IsA("Model") then return char end
+    return nil
+end
+local function getRoot(plr)
+    local char = getChar(plr)
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+end
 local function getPart(plr, name)
-    local char = plr.Character if not char then return nil end
-    if name == "Head" then return char:FindFirstChild("Head") or char:FindFirstChild("HeadHB") or char:FindFirstChild("FakeHead") end
+    local char = getChar(plr) if not char then return nil end
+    if name == "HeadHB" then return char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead") end
+    if name == "Head" then return char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead") end
     if name == "Torso" then return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("LowerTorso") end
     return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
 end
@@ -265,23 +288,25 @@ local function updateRayFilter()
     RayParams.FilterDescendantsInstances = ignore
 end
 local function isVisible(plr, part)
-    if not part or not plr.Character then return false end
+    local char = getChar(plr)
+    if not part or not char then return false end
     updateRayFilter()
     local origin = Camera.CFrame.Position
     local delta = part.Position - origin
     local hit = workspace:Raycast(origin, delta, RayParams)
     if not hit then return true end
-    return hit.Instance:IsDescendantOf(plr.Character)
+    return hit.Instance:IsDescendantOf(char)
 end
 local function espColor(plr)
-    if Aim.ActiveTarget == plr then return Library.Theme.Accent end
+    if Aim.ActiveTarget == plr then return themeAccent() end
     if Esp.VisibleRed then local part = getPart(plr, "Head") or getRoot(plr) if part and isVisible(plr, part) then return ESP_VISIBLE end end
     return ESP_DEFAULT
 end
 local function healthColor(ratio) return Color3.fromRGB(255 - math.floor(200 * ratio), math.floor(220 * ratio + 35), 70) end
 local function getBounds(char)
+    if not char then return nil end
     local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge local ok = false
-    for _, part in ipairs(char:GetChildren()) do
+    for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
             local cf, sz = part.CFrame, part.Size * 0.5
             for _, off in ipairs(PART_CORNERS) do
@@ -360,7 +385,8 @@ local function radarOffset(localRoot, targetRoot, radius)
     local delta = targetRoot.Position - localRoot.Position
     local flat = Vector3.new(delta.X, 0, delta.Z)
     local dist = flat.Magnitude
-    if dist > Radar.Range then return nil end
+    if dist < 0.01 then return Vector2.new(0, 0) end
+    if dist > Radar.Range then flat = flat.Unit * Radar.Range end
     local localFlat = Camera.CFrame:VectorToObjectSpace(flat)
     local scale = radius - 8
     return Vector2.new((localFlat.X / Radar.Range) * scale, (localFlat.Z / Radar.Range) * scale)
@@ -383,7 +409,7 @@ local function updateRadar()
     RadarRing.Visible = true
     RadarRing.Position = center
     RadarRing.Radius = radius
-    RadarRing.Color = Library.Theme.Accent
+    RadarRing.Color = themeAccent()
     if Radar.Crosshair then
         RadarCrossH.Visible = true
         RadarCrossH.From = center + Vector2.new(-radius + 6, 0)
@@ -418,11 +444,16 @@ local function updateRadar()
         end
     end
 end
+local function ensureEspObj(plr)
+    if plr == LocalPlayer then return end
+    if not Esp.Objects[plr] then Esp.Objects[plr] = makeEspObj() end
+end
 local function updateEsp(plr, obj)
     if not Esp.Enabled then hideEsp(obj) return end
     if Esp.TeamCheck and sameTeam(LocalPlayer, plr) then hideEsp(obj) return end
     if not alive(plr) then hideEsp(obj) return end
-    local char = plr.Character local root = getRoot(plr)
+    local char = getChar(plr) local root = getRoot(plr)
+    if not char or not root then hideEsp(obj) return end
     local hpVal = getHealth(plr) or 0 local maxHp = 100
     local n = plr:FindFirstChild("NRPBS") if n and n:FindFirstChild("MaxHealth") then maxHp = n.MaxHealth.Value end
     local dist = (root.Position - Camera.CFrame.Position).Magnitude
@@ -440,6 +471,7 @@ local function updateEsp(plr, obj)
     if Esp.Skeleton then local bi=1 for _, pair in ipairs(SKELETON) do if bi>#obj.Bones then break end local pa,pb=worldPoint(char:FindFirstChild(pair[1])),worldPoint(char:FindFirstChild(pair[2])) if pa and pb then setLine(obj.Bones[bi],pa,pb,true,col,1.1,0.82) bi=bi+1 end end for j=bi,#obj.Bones do obj.Bones[j].Visible=false end else hideLines(obj.Bones) end
 end
 
+
 for _, plr in ipairs(Players:GetPlayers()) do if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() end end
 Players.PlayerAdded:Connect(function(plr) if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() end end)
 Players.PlayerRemoving:Connect(function(plr)
@@ -455,10 +487,20 @@ end)
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Aim.Key then Aim.Holding = false Aim.ActiveTarget = nil Aim.StickyTarget = nil end
 end)
-conn = RunService.RenderStepped:Connect(function()
-    if not Camera then Camera = workspace.CurrentCamera end
-    local origin = getAimOrigin() local accent = Library.Theme.Accent
-    if Aim.ShowFOV and Aim.Enabled then FovCircle.Visible=true FovCircle.Position=origin FovCircle.Radius=Aim.FOV FovCircle.Color=accent else FovCircle.Visible=false end
+local function renderFrame()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+    for _, plr in ipairs(Players:GetPlayers()) do ensureEspObj(plr) end
+    local origin = getAimOrigin()
+    local accent = themeAccent()
+    if Aim.ShowFOV and Aim.Enabled then
+        FovCircle.Visible = true
+        FovCircle.Position = origin
+        FovCircle.Radius = Aim.FOV
+        FovCircle.Color = accent
+    else
+        FovCircle.Visible = false
+    end
     Aim.ActiveTarget = nil
     if Aim.Enabled and Aim.Holding then
         if Aim.StickyTarget and not validAimTarget(Aim.StickyTarget) then Aim.StickyTarget = nil end
@@ -467,10 +509,39 @@ conn = RunService.RenderStepped:Connect(function()
             Aim.ActiveTarget = plr
             local goal = CFrame.lookAt(Camera.CFrame.Position, part.Position)
             Camera.CFrame = Camera.CFrame:Lerp(goal, math.clamp(1 / Aim.Smooth, 0.05, 1))
-        else Aim.StickyTarget = nil end
+        else
+            Aim.StickyTarget = nil
+        end
     end
-    for plr, obj in pairs(Esp.Objects) do updateEsp(plr, obj) end
-    updateRadar()
+    for plr, obj in pairs(Esp.Objects) do
+        local ok, err = pcall(updateEsp, plr, obj)
+        if not ok then
+            local now = os.clock()
+            if now - renderErrAt > 2 then
+                renderErrAt = now
+                warn("[Midnight] esp error:", plr.Name, err)
+            end
+        end
+    end
+    local okRadar, errRadar = pcall(updateRadar)
+    if not okRadar then
+        local now = os.clock()
+        if now - renderErrAt > 2 then
+            renderErrAt = now
+            warn("[Midnight] radar error:", errRadar)
+        end
+    end
+end
+
+conn = RunService.RenderStepped:Connect(function()
+    local ok, err = pcall(renderFrame)
+    if not ok then
+        local now = os.clock()
+        if now - renderErrAt > 2 then
+            renderErrAt = now
+            warn("[Midnight] render error:", err)
+        end
+    end
 end)
 
 local Controller = {}
@@ -487,4 +558,8 @@ function Controller:Destroy(skipLibrary)
     if not skipLibrary and Library then Library:Destroy() end
     getgenv().MidnightCheat = nil
 end
-getgenv().MidnightCheat = Controller persist() print("[Midnight] loaded for " .. gameName)
+getgenv().MidnightCheat = Controller
+getgenv().MidnightState = { Aim = Aim, Esp = Esp, Radar = Radar }
+persist()
+print("[Midnight] loaded for " .. gameName)
+print("[Midnight] esp=" .. tostring(Esp.Enabled) .. " radar=" .. tostring(Radar.Enabled) .. " players=" .. tostring(#Players:GetPlayers() - 1))
