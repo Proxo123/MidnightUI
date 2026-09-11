@@ -1,0 +1,18 @@
+# Rojo / Roblox build output
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+*.rbxm
+*.rbxmx
+build/
+
+# tooling
+/sourcemap.json
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# local helper, not part of the library
+setup-and-push.ps1

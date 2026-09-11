@@ -1,0 +1,23 @@
+{
+  "name": "MidnightUI",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "MidnightUI": {
+        "$path": "src/MidnightUI.lua"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "MidnightUILoader": {
+          "$path": "src/Loader.client.lua"
+        }
+      }
+    }
+  }
+}
