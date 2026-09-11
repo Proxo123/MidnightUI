@@ -325,7 +325,31 @@ local function drawCorners(shadow, main, x, y, w, h, col)
     for i, p in ipairs(pairs) do local si = (i-1)*2+1 setLine(shadow[si],p[1],p[2],true,OUTLINE,3.2,0.35) setLine(shadow[si+1],p[1],p[3],true,OUTLINE,3.2,0.35) setLine(main[si],p[1],p[2],true,col,1.6,1) setLine(main[si+1],p[1],p[3],true,col,1.6,1) end
 end
 local function hideLines(lines) for _, l in ipairs(lines) do l.Visible = false end end
-local SKELETON = {{"Head","UpperTorso"},{"Head","Torso"},{"UpperTorso","LowerTorso"},{"Torso","HumanoidRootPart"},{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},{"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},{"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},{"Torso","Left Arm"},{"Torso","Right Arm"},{"Torso","Left Leg"},{"Torso","Right Leg"}}
+local SKELETON_R15 = {
+    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},{"LowerTorso","HumanoidRootPart"},
+    {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+}
+local SKELETON_R6 = {
+    {"Head","Torso"},{"Torso","HumanoidRootPart"},
+    {"Torso","Left Arm"},{"Torso","Right Arm"},{"Torso","Left Leg"},{"Torso","Right Leg"},
+}
+local function findBone(char, name)
+    if name == "Head" then return char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("FakeHead") end
+    return char:FindFirstChild(name)
+end
+local function skeletonPairs(char)
+    if char:FindFirstChild("UpperTorso") then return SKELETON_R15 end
+    return SKELETON_R6
+end
+local function boneLine(char, aName, bName)
+    local a, b = findBone(char, aName), findBone(char, bName)
+    if not a or not b then return nil, nil end
+    if (a.Position - b.Position).Magnitude > 9 then return nil, nil end
+    return worldPoint(a), worldPoint(b)
+end
 local function makeEspObj() return { Shadow = newLines(8,3.2,OUTLINE), Corners = newLines(8,1.6,Color3.new(1,1,1)), Fill = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.82,Visible=false,Color=OUTLINE}), HealthBg = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.45,Visible=false,Color=OUTLINE}), HealthFill = newDraw("Square",{Filled=true,Thickness=0,Transparency=0.15,Visible=false,Color=Color3.fromRGB(80,220,120)}), HeadRing = newDraw("Circle",{Filled=false,Thickness=1.4,NumSides=24,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), HeadDot = newDraw("Circle",{Filled=true,Thickness=0,NumSides=16,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), Name = newDraw("Text",{Size=14,Center=true,Outline=true,Font=2,Transparency=1,Visible=false,Color=Color3.new(1,1,1)}), Sub = newDraw("Text",{Size=12,Center=true,Outline=true,Font=2,Transparency=1,Visible=false,Color=Color3.fromRGB(185,185,200)}), Tracer = newDraw("Line",{Thickness=1.2,Transparency=0.55,Visible=false,Color=Color3.new(1,1,1)}), Bones = newLines(20,1.1,Color3.new(1,1,1)) } end
 local function hideEsp(obj) hideLines(obj.Shadow) hideLines(obj.Corners) hideLines(obj.Bones) obj.Fill.Visible=false obj.HealthBg.Visible=false obj.HealthFill.Visible=false obj.HeadRing.Visible=false obj.HeadDot.Visible=false obj.Name.Visible=false obj.Sub.Visible=false obj.Tracer.Visible=false end
 local function destroyEsp(obj) for _, v in pairs(obj) do if type(v)=="table" then for _, d in ipairs(v) do pcall(function() d:Remove() end) end else pcall(function() v:Remove() end) end end end
@@ -468,7 +492,7 @@ local function updateEsp(plr, obj)
     if Esp.HeadDot then local head=char:FindFirstChild("Head") or char:FindFirstChild("HeadHB") local hp2=worldPoint(head) if hp2 then obj.HeadDot.Visible=true obj.HeadDot.Position=hp2 obj.HeadDot.Radius=math.clamp(h*0.035,2.5,5) obj.HeadDot.Color=col obj.HeadRing.Visible=true obj.HeadRing.Position=hp2 obj.HeadRing.Radius=obj.HeadDot.Radius+2.2 obj.HeadRing.Color=OUTLINE else obj.HeadDot.Visible=false obj.HeadRing.Visible=false end else obj.HeadDot.Visible=false obj.HeadRing.Visible=false end
     if Esp.Labels then obj.Name.Visible=true obj.Name.Text=plr.DisplayName obj.Name.Color=col obj.Name.Position=Vector2.new(minX+w*0.5,minY-18) obj.Sub.Visible=true obj.Sub.Text=string.format("%dm  |  %.0f HP",math.floor(dist*0.28),hpVal) obj.Sub.Position=Vector2.new(minX+w*0.5,minY-4) else obj.Name.Visible=false obj.Sub.Visible=false end
     if Esp.Tracers then local rp=worldPoint(root) if rp then obj.Tracer.Visible=true obj.Tracer.Color=col obj.Tracer.From=Vector2.new(Camera.ViewportSize.X*0.5,Camera.ViewportSize.Y) obj.Tracer.To=rp else obj.Tracer.Visible=false end else obj.Tracer.Visible=false end
-    if Esp.Skeleton then local bi=1 for _, pair in ipairs(SKELETON) do if bi>#obj.Bones then break end local pa,pb=worldPoint(char:FindFirstChild(pair[1])),worldPoint(char:FindFirstChild(pair[2])) if pa and pb then setLine(obj.Bones[bi],pa,pb,true,col,1.1,0.82) bi=bi+1 end end for j=bi,#obj.Bones do obj.Bones[j].Visible=false end else hideLines(obj.Bones) end
+    if Esp.Skeleton then local bi=1 for _, pair in ipairs(skeletonPairs(char)) do if bi>#obj.Bones then break end local pa,pb=boneLine(char,pair[1],pair[2]) if pa and pb then setLine(obj.Bones[bi],pa,pb,true,col,1.1,0.82) bi=bi+1 end end for j=bi,#obj.Bones do obj.Bones[j].Visible=false end else hideLines(obj.Bones) end
 end
 
 
