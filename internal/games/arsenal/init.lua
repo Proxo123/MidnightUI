@@ -145,6 +145,7 @@ local Exploits = {
     NoRecoil = SavedExploits.NoRecoil == true,
     RapidFire = SavedExploits.RapidFire == true,
     InstantReload = SavedExploits.InstantReload == true,
+    InstantEquip = SavedExploits.InstantEquip == true,
     AlwaysAuto = SavedExploits.AlwaysAuto == true,
     InfiniteAmmo = SavedExploits.InfiniteAmmo == true,
 }
@@ -173,7 +174,7 @@ local function snapshot()
         Exploits = {
             NoSpread = Exploits.NoSpread, NoRecoil = Exploits.NoRecoil,
             RapidFire = Exploits.RapidFire, InstantReload = Exploits.InstantReload,
-            AlwaysAuto = Exploits.AlwaysAuto, InfiniteAmmo = Exploits.InfiniteAmmo,
+            InstantEquip = Exploits.InstantEquip, AlwaysAuto = Exploits.AlwaysAuto, InfiniteAmmo = Exploits.InfiniteAmmo,
         },
         Settings = { MenuKey = keyName(menuKey), Scheme = scheme },
     }
@@ -271,10 +272,9 @@ ExploitPage.Left:AddToggle({ Text = "No Spread", Flag = "ExpNoSpread", Default =
 ExploitPage.Left:AddToggle({ Text = "No Recoil", Flag = "ExpNoRecoil", Default = Exploits.NoRecoil, Callback = function(v) Exploits.NoRecoil = v applyWeaponExploits() persist() end })
 ExploitPage.Left:AddToggle({ Text = "Rapid Fire", Flag = "ExpRapidFire", Default = Exploits.RapidFire, Callback = function(v) Exploits.RapidFire = v applyWeaponExploits() persist() end })
 ExploitPage.Left:AddToggle({ Text = "Instant Reload", Flag = "ExpInstantReload", Default = Exploits.InstantReload, Callback = function(v) Exploits.InstantReload = v applyWeaponExploits() persist() end })
+ExploitPage.Left:AddToggle({ Text = "Instant Equip", Flag = "ExpInstantEquip", Default = Exploits.InstantEquip, Callback = function(v) Exploits.InstantEquip = v applyWeaponExploits() persist() end })
 ExploitPage.Right:AddToggle({ Text = "Always Auto", Flag = "ExpAlwaysAuto", Default = Exploits.AlwaysAuto, Callback = function(v) Exploits.AlwaysAuto = v applyWeaponExploits() persist() end })
 ExploitPage.Right:AddToggle({ Text = "Infinite Ammo", Flag = "ExpInfiniteAmmo", Default = Exploits.InfiniteAmmo, Callback = function(v) Exploits.InfiniteAmmo = v applyWeaponExploits() persist() end })
-ExploitPage.Right:AddLabel("FireRate 0.025 | ReloadTime 0")
-ExploitPage.Right:AddLabel("Auto = true | Infinite folder")
 
 weaponDefaults = {}
 weaponConns = {}
@@ -282,9 +282,10 @@ local toolHooks = {}
 local infiniteAdded = {}
 local RAPID_FIRE_RATE = 0.025
 local INSTANT_RELOAD_TIME = 0
+local INSTANT_EQUIP_TIME = 0
 
 local function anyExploitOn()
-    return Exploits.NoSpread or Exploits.NoRecoil or Exploits.RapidFire or Exploits.InstantReload or Exploits.AlwaysAuto or Exploits.InfiniteAmmo
+    return Exploits.NoSpread or Exploits.NoRecoil or Exploits.RapidFire or Exploits.InstantReload or Exploits.InstantEquip or Exploits.AlwaysAuto or Exploits.InfiniteAmmo
 end
 
 local function rememberWeaponValue(val)
@@ -303,6 +304,7 @@ local function collectToolValues(tool)
         recoil = tool:FindFirstChild("RecoilControl") or tool:FindFirstChild("Recoil"),
         fireRate = tool:FindFirstChild("FireRate"),
         reloadTime = tool:FindFirstChild("ReloadTime"),
+        equipTime = tool:FindFirstChild("EquipTime"),
         auto = tool:FindFirstChild("Auto"),
         root = tool,
     }
@@ -311,7 +313,7 @@ end
 local function toolNeedsHook(tool)
     if not tool then return false end
     local vals = collectToolValues(tool)
-    if vals.spread or vals.maxSpread or vals.recoil or vals.recovery or vals.fireRate or vals.reloadTime or vals.auto then
+    if vals.spread or vals.maxSpread or vals.recoil or vals.recovery or vals.fireRate or vals.reloadTime or vals.equipTime or vals.auto then
         return true
     end
     return Exploits.InfiniteAmmo and (tool:IsA("Tool") or tool:IsA("Folder") or tool:IsA("ModuleScript"))
@@ -361,6 +363,12 @@ local function applyToolValues(vals)
     else
         restoreWeaponValue(vals.reloadTime)
     end
+    if Exploits.InstantEquip and vals.equipTime then
+        rememberWeaponValue(vals.equipTime)
+        if vals.equipTime.Value ~= INSTANT_EQUIP_TIME then vals.equipTime.Value = INSTANT_EQUIP_TIME end
+    else
+        restoreWeaponValue(vals.equipTime)
+    end
     if Exploits.AlwaysAuto and vals.auto then
         rememberWeaponValue(vals.auto)
         if vals.auto.Value ~= true then vals.auto.Value = true end
@@ -401,8 +409,10 @@ local function hookEquippedTool(tool)
         refresh()
     end
     refresh()
-    for _, val in pairs(vals) do
-        if val then table.insert(conns, val:GetPropertyChangedSignal("Value"):Connect(debouncedRefresh)) end
+    for key, val in pairs(vals) do
+        if key ~= "root" and val and val:IsA("ValueBase") then
+            table.insert(conns, val:GetPropertyChangedSignal("Value"):Connect(debouncedRefresh))
+        end
     end
     table.insert(conns, tool.AncestryChanged:Connect(function(_, parent)
         if not parent then clearToolHook(tool) end
