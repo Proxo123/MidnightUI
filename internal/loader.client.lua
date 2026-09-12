@@ -2,7 +2,7 @@ if getgenv().MidnightCheat then
 	getgenv().MidnightCheat:Destroy(true)
 end
 
-local VERSION = "d9ff504"
+local VERSION = "09f5864"
 local REPO = "https://raw.githubusercontent.com/Proxo123/MidnightUI/" .. VERSION
 
 local function fetch(path)

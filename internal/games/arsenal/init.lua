@@ -217,7 +217,7 @@ local function themeAccent()
     return ACCENT_FALLBACK
 end
 
-Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Proxo123/MidnightUI/d9ff504/src/MidnightUI.lua"))()
+Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Proxo123/MidnightUI/09f5864/src/MidnightUI.lua"))()
 LibraryRef = Library
 Window = Library:CreateWindow({ Title = "Midnight Internal - " .. gameName, Size = UDim2.fromOffset(520, 520), ToggleKey = Settings.MenuKey, Scheme = Settings.Scheme, OnUnload = function() if getgenv().MidnightCheat then getgenv().MidnightCheat:Destroy(true) end end })
 Window.Settings.Left:AddLabel("Config: " .. CONFIG_PATH)
