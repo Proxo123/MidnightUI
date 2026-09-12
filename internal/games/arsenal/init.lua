@@ -118,6 +118,7 @@ local Esp = {
     HeadDot = SavedEsp.HeadDot ~= false,
     Skeleton = SavedEsp.Skeleton ~= false,
     Tracers = SavedEsp.Tracers == true,
+    BulletTracers = SavedEsp.BulletTracers == true,
     Labels = SavedEsp.Labels ~= false,
     VisibleRed = SavedEsp.VisibleRed == true,
     TeamCheck = SavedEsp.TeamCheck ~= false,
@@ -167,7 +168,7 @@ local function snapshot()
         Aim = { Enabled = Aim.Enabled, Key = bindName(Aim.Key), FOV = Aim.FOV, ShowFOV = Aim.ShowFOV, IgnoreFOV = Aim.IgnoreFOV, Visible = Aim.Visible, TeamCheck = Aim.TeamCheck, Part = Aim.Part, Smooth = Aim.Smooth, Sticky = Aim.Sticky },
         Esp = {
             Enabled = Esp.Enabled, Corners = Esp.Corners, Fill = Esp.Fill, Health = Esp.Health, HeadDot = Esp.HeadDot,
-            Skeleton = Esp.Skeleton, Tracers = Esp.Tracers, Labels = Esp.Labels, VisibleRed = Esp.VisibleRed,
+            Skeleton = Esp.Skeleton, Tracers = Esp.Tracers, BulletTracers = Esp.BulletTracers, Labels = Esp.Labels, VisibleRed = Esp.VisibleRed,
             TeamCheck = Esp.TeamCheck, MaxDist = Esp.MaxDist, Radar = Radar.Enabled, RadarPosition = Radar.Position,
             RadarRange = Radar.Range, RadarSize = Radar.Size, RadarPadding = Radar.Padding, RadarOffsetX = Radar.OffsetX,
             RadarOffsetY = Radar.OffsetY, RadarCustomX = Radar.CustomX, RadarCustomY = Radar.CustomY,
@@ -204,6 +205,12 @@ local BOUNDS_PARTS = {
 local visCache = {}
 local rayFilterDirty = true
 local LibraryRef
+local BULLET_TRACER_MAX = 24
+local BULLET_TRACER_LIFE = 0.4
+local bulletTracerPool = {}
+local bulletTracerActive = {}
+local bulletTracerHue = 0
+local bulletTracerHook = nil
 
 local function themeAccent()
     if LibraryRef and LibraryRef.Theme and LibraryRef.Theme.Accent then return LibraryRef.Theme.Accent end
@@ -251,6 +258,7 @@ EspPage.Left:AddToggle({ Text = "Health Bar", Flag = "EspHealth", Default = Esp.
 EspPage.Left:AddToggle({ Text = "Head Dot", Flag = "EspHeadDot", Default = Esp.HeadDot, Callback = function(v) Esp.HeadDot = v persist() end })
 EspPage.Left:AddToggle({ Text = "Skeleton", Flag = "EspSkeleton", Default = Esp.Skeleton, Callback = function(v) Esp.Skeleton = v persist() end })
 EspPage.Right:AddToggle({ Text = "Tracers", Flag = "EspTracers", Default = Esp.Tracers, Callback = function(v) Esp.Tracers = v persist() end })
+EspPage.Right:AddToggle({ Text = "Bullet Tracers", Flag = "EspBulletTracers", Default = Esp.BulletTracers, Callback = function(v) Esp.BulletTracers = v if v then setupBulletTracerHook() end persist() end })
 EspPage.Right:AddToggle({ Text = "Labels", Flag = "EspLabels", Default = Esp.Labels, Callback = function(v) Esp.Labels = v persist() end })
 EspPage.Right:AddToggle({ Text = "Red If Visible", Flag = "EspVisibleRed", Default = Esp.VisibleRed, Callback = function(v) Esp.VisibleRed = v persist() end })
 EspPage.Right:AddToggle({ Text = "Team Check", Flag = "EspTeam", Default = Esp.TeamCheck, Callback = function(v) Esp.TeamCheck = v persist() end })
@@ -784,6 +792,83 @@ local function updateEsp(plr, obj, camPos, accent)
     if Esp.Skeleton then local bi=1 for _, pair in ipairs(skeletonPairs(char)) do if bi>#obj.Bones then break end local pa,pb=boneLine(char,pair[1],pair[2]) if pa and pb then setLine(obj.Bones[bi],pa,pb,true,col,1.1,0.82) bi=bi+1 end end for j=bi,#obj.Bones do obj.Bones[j].Visible=false end else hideLines(obj.Bones) end
 end
 
+local function spawnBulletTracer(fromPos, toPos)
+    if not Esp.BulletTracers or typeof(fromPos) ~= "Vector3" or typeof(toPos) ~= "Vector3" then return end
+    if (fromPos - toPos).Magnitude < 0.5 then return end
+    bulletTracerHue = (bulletTracerHue + 0.09) % 1
+    local line
+    if #bulletTracerPool > 0 then
+        line = table.remove(bulletTracerPool)
+    else
+        line = newDraw("Line", { Thickness = 1.6, Transparency = 1, Visible = false, Color = Color3.new(1, 1, 1) })
+    end
+    if #bulletTracerActive >= BULLET_TRACER_MAX then
+        local old = table.remove(bulletTracerActive, 1)
+        old.line.Visible = false
+        table.insert(bulletTracerPool, old.line)
+    end
+    table.insert(bulletTracerActive, { line = line, from = fromPos, to = toPos, born = os.clock(), hue = bulletTracerHue })
+end
+
+local function updateBulletTracers(now)
+    if not Esp.BulletTracers then
+        for i = 1, #bulletTracerActive do bulletTracerActive[i].line.Visible = false end
+        return
+    end
+    if not Camera then return end
+    local i = 1
+    while i <= #bulletTracerActive do
+        local t = bulletTracerActive[i]
+        local age = now - t.born
+        if age >= BULLET_TRACER_LIFE then
+            t.line.Visible = false
+            table.insert(bulletTracerPool, t.line)
+            table.remove(bulletTracerActive, i)
+        else
+            local a, onA = Camera:WorldToViewportPoint(t.from)
+            local b, onB = Camera:WorldToViewportPoint(t.to)
+            if onA and onB and a.Z > 0 and b.Z > 0 then
+                local fade = 1 - age / BULLET_TRACER_LIFE
+                t.line.Visible = true
+                t.line.From = Vector2.new(a.X, a.Y)
+                t.line.To = Vector2.new(b.X, b.Y)
+                t.line.Color = Color3.fromHSV(t.hue, 1, 1)
+                t.line.Transparency = math.clamp(1 - fade * 0.9, 0.1, 1)
+            else
+                t.line.Visible = false
+            end
+            i = i + 1
+        end
+    end
+end
+
+local function setupBulletTracerHook()
+    if bulletTracerHook or not hookmetamethod then return end
+    local events = ReplicatedStorage:WaitForChild("Events", 10)
+    if not events then return end
+    local hitPart = events:FindFirstChild("HitPart")
+    if not hitPart then return end
+    local old
+    old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        if Esp.BulletTracers and getnamecallmethod() == "FireServer" and self == hitPart then
+            local args = { ... }
+            local pos = args[2]
+            if typeof(pos) ~= "Vector3" and typeof(args[1]) == "Instance" and args[1]:IsA("BasePart") then
+                pos = args[1].Position
+            end
+            if typeof(pos) == "Vector3" then
+                local cam = workspace.CurrentCamera
+                local from = cam and cam.CFrame.Position or pos
+                spawnBulletTracer(from, pos)
+            end
+        end
+        return old(self, ...)
+    end))
+    bulletTracerHook = old
+end
+
+if Esp.BulletTracers then setupBulletTracerHook() end
+
 
 for _, plr in ipairs(Players:GetPlayers()) do if plr ~= LocalPlayer then Esp.Objects[plr] = makeEspObj() end end
 rebuildEspPlayers()
@@ -861,6 +946,7 @@ local function renderFrame()
             warn("[Midnight] radar error:", errRadar)
         end
     end
+    updateBulletTracers(now)
 end
 
 conn = RunService.RenderStepped:Connect(function()
@@ -888,6 +974,10 @@ function Controller:Destroy(skipLibrary)
     if weaponConns then for _, c in ipairs(weaponConns) do pcall(function() c:Disconnect() end) end weaponConns = {} end
     for tool in pairs(toolHooks) do clearToolHook(tool) end
     for root in pairs(infiniteAdded) do removeAddedInfiniteFolder(root) end
+    if bulletTracerHook and hookmetamethod then pcall(function() hookmetamethod(game, "__namecall", bulletTracerHook) end) bulletTracerHook = nil end
+    for i = 1, #bulletTracerActive do pcall(function() bulletTracerActive[i].line:Remove() end) end
+    for i = 1, #bulletTracerPool do pcall(function() bulletTracerPool[i]:Remove() end) end
+    bulletTracerActive = {} bulletTracerPool = {}
     visCache = {}
     if not skipLibrary and Library then Library:Destroy() end
     getgenv().MidnightCheat = nil
@@ -895,5 +985,5 @@ end
 getgenv().MidnightCheat = Controller
 getgenv().MidnightState = { Aim = Aim, Esp = Esp, Radar = Radar, Exploits = Exploits }
 persist()
-print("[Midnight] loaded for " .. gameName .. " (ignore-fov-fix)")
+print("[Midnight] loaded for " .. gameName .. " (bullet-tracers)")
 print("[Midnight] esp=" .. tostring(Esp.Enabled) .. " radar=" .. tostring(Radar.Enabled) .. " players=" .. tostring(#Players:GetPlayers() - 1))
