@@ -2,10 +2,11 @@ if getgenv().MidnightCheat then
 	getgenv().MidnightCheat:Destroy(true)
 end
 
-local REPO = "https://raw.githubusercontent.com/Proxo123/MidnightUI/main"
+local VERSION = "5aa1ae0"
+local REPO = "https://raw.githubusercontent.com/Proxo123/MidnightUI/" .. VERSION
 
 local function fetch(path)
-	local url = REPO .. path .. "?v=" .. tostring(os.time())
+	local url = REPO .. path
 	local ok, src = pcall(function()
 		return game:HttpGet(url)
 	end)
