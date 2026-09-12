@@ -14,10 +14,40 @@ MidnightUI/
 ├── src/
 │   ├── MidnightUI.lua          ModuleScript — the library
 │   └── Loader.client.lua       LocalScript  — minimal client-side loader
+├── internal/
+│   ├── loader.client.lua       Midnight Internal entry — picks the game module
+│   └── games/
+│       ├── registry.lua        PlaceId → game folder mapping
+│       └── arsenal/
+│           └── init.lua        Arsenal-specific cheat
 ├── examples/
-│   └── FullDemo.client.lua     LocalScript  — every control, larger layout
+│   ├── FullDemo.client.lua     LocalScript  — every control, larger layout
+│   └── Internal.client.lua     Loads Midnight Internal via the central loader
 └── default.project.json        Rojo mapping
 ```
+
+## Midnight Internal (multi-game)
+
+One loader detects the current game and pulls the matching module from GitHub.
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Proxo123/MidnightUI/main/internal/loader.client.lua"))()
+```
+
+### Add a new game
+
+1. Create `internal/games/<folder>/init.lua` with the game-specific script.
+2. Register it in `internal/games/registry.lua`:
+
+```lua
+return {
+    [286090429] = { folder = "arsenal", name = "Arsenal" },
+    [123456789] = { folder = "mygame", name = "My Game" },
+}
+```
+
+The loader sets `getgenv().MidnightGame` (`key`, `name`, `placeId`) before running the module.
+Unsupported games show a short alert with the place id.
 
 ## Install
 
