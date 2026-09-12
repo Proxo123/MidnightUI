@@ -5,7 +5,7 @@ end
 local REPO = "https://raw.githubusercontent.com/Proxo123/MidnightUI/main"
 
 local function fetch(path)
-	local url = REPO .. path
+	local url = REPO .. path .. "?v=" .. tostring(os.time())
 	local ok, src = pcall(function()
 		return game:HttpGet(url)
 	end)
