@@ -105,6 +105,7 @@ local Aim = {
     Part = SavedAim.Part or "Head",
     Smooth = tonumber(SavedAim.Smooth) or 5,
     Sticky = SavedAim.Sticky == true,
+    IgnoreFOV = SavedAim.IgnoreFOV == true,
     ActiveTarget = nil,
     StickyTarget = nil,
 }
@@ -163,7 +164,7 @@ local function snapshot()
     local menuKey = Settings.MenuKey
     if Library and Library.Flags and Library.Flags.Midnight_MenuKey then menuKey = Library.Flags.Midnight_MenuKey end
     return {
-        Aim = { Enabled = Aim.Enabled, Key = bindName(Aim.Key), FOV = Aim.FOV, ShowFOV = Aim.ShowFOV, Visible = Aim.Visible, TeamCheck = Aim.TeamCheck, Part = Aim.Part, Smooth = Aim.Smooth, Sticky = Aim.Sticky },
+        Aim = { Enabled = Aim.Enabled, Key = bindName(Aim.Key), FOV = Aim.FOV, ShowFOV = Aim.ShowFOV, IgnoreFOV = Aim.IgnoreFOV, Visible = Aim.Visible, TeamCheck = Aim.TeamCheck, Part = Aim.Part, Smooth = Aim.Smooth, Sticky = Aim.Sticky },
         Esp = {
             Enabled = Esp.Enabled, Corners = Esp.Corners, Fill = Esp.Fill, Health = Esp.Health, HeadDot = Esp.HeadDot,
             Skeleton = Esp.Skeleton, Tracers = Esp.Tracers, Labels = Esp.Labels, VisibleRed = Esp.VisibleRed,
@@ -235,6 +236,7 @@ AimPage.Left:AddToggle({ Text = "Show FOV", Flag = "AimShowFOV", Default = Aim.S
 AimPage.Left:AddToggle({ Text = "Visible Check", Flag = "AimVisible", Default = Aim.Visible, Callback = function(v) Aim.Visible = v persist() end })
 AimPage.Left:AddToggle({ Text = "Team Check", Flag = "AimTeam", Default = Aim.TeamCheck, Callback = function(v) Aim.TeamCheck = v persist() end })
 AimPage.Left:AddToggle({ Text = "Sticky Aim", Flag = "AimSticky", Default = Aim.Sticky, Callback = function(v) Aim.Sticky = v Aim.StickyTarget = nil persist() end })
+AimPage.Left:AddToggle({ Text = "Ignore FOV", Flag = "AimIgnoreFOV", Default = Aim.IgnoreFOV, Callback = function(v) Aim.IgnoreFOV = v Aim.StickyTarget = nil persist() end })
 AimPage.Right:AddKeybind({ Text = "Aim Key", Default = Aim.Key, Flag = "AimKey", Callback = function(k) Aim.Key = k persist() end })
 AimPage.Right:AddSlider({ Text = "FOV", Min = 20, Max = 500, Default = Aim.FOV, Decimals = 0, ShowValue = true, Flag = "AimFOV", Callback = function(v) Aim.FOV = v persist() end })
 AimPage.Right:AddSlider({ Text = "Smoothness", Min = 1, Max = 20, Default = Aim.Smooth, Decimals = 1, ShowValue = true, Flag = "AimSmooth", Callback = function(v) Aim.Smooth = v persist() end })
@@ -619,7 +621,26 @@ local function validAimTarget(plr)
     return true
 end
 local function getClosestToCrosshair()
-    local origin = getAimOrigin() local best, bestPart, bestDist = nil, nil, Aim.FOV
+    local origin = getAimOrigin()
+    local best, bestPart, bestMetric = nil, nil, math.huge
+    if Aim.IgnoreFOV then
+        local look = Camera.CFrame.LookVector
+        local camPos = Camera.CFrame.Position
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if validAimTarget(plr) then
+                local part = getPart(plr, Aim.Part)
+                if part then
+                    local delta = part.Position - camPos
+                    if delta.Magnitude > 0.01 then
+                        local angle = math.acos(math.clamp(look:Dot(delta.Unit), -1, 1))
+                        if angle < bestMetric then bestMetric = angle best = plr bestPart = part end
+                    end
+                end
+            end
+        end
+        return best, bestPart
+    end
+    bestMetric = Aim.FOV
     for _, plr in ipairs(Players:GetPlayers()) do
         if validAimTarget(plr) then
             local part = getPart(plr, Aim.Part)
@@ -627,7 +648,7 @@ local function getClosestToCrosshair()
                 local sp = Camera:WorldToViewportPoint(part.Position)
                 if sp.Z > 0 then
                     local dist = (Vector2.new(sp.X, sp.Y) - origin).Magnitude
-                    if dist <= Aim.FOV and dist < bestDist then bestDist = dist best = plr bestPart = part end
+                    if dist <= Aim.FOV and dist < bestMetric then bestMetric = dist best = plr bestPart = part end
                 end
             end
         end
@@ -639,7 +660,11 @@ local function resolveAimTarget()
     if not Aim.Sticky then Aim.StickyTarget = nil return getClosestToCrosshair() end
     if Aim.StickyTarget and validAimTarget(Aim.StickyTarget) then
         local part = getPart(Aim.StickyTarget, Aim.Part)
-        if part then local dist = getScreenDist(part) if dist and dist <= Aim.FOV then return Aim.StickyTarget, part end end
+        if part then
+            if Aim.IgnoreFOV then return Aim.StickyTarget, part end
+            local dist = getScreenDist(part)
+            if dist and dist <= Aim.FOV then return Aim.StickyTarget, part end
+        end
     end
     Aim.StickyTarget = nil
     local plr, part = getClosestToCrosshair()
