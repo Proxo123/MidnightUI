@@ -212,7 +212,7 @@ end
 
 Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Proxo123/MidnightUI/main/src/MidnightUI.lua"))()
 LibraryRef = Library
-Window = Library:CreateWindow({ Title = "Midnight Internal - " .. gameName, Size = UDim2.fromOffset(520, 470), ToggleKey = Settings.MenuKey, Scheme = Settings.Scheme, OnUnload = function() if getgenv().MidnightCheat then getgenv().MidnightCheat:Destroy(true) end end })
+Window = Library:CreateWindow({ Title = "Midnight Internal - " .. gameName, Size = UDim2.fromOffset(520, 520), ToggleKey = Settings.MenuKey, Scheme = Settings.Scheme, OnUnload = function() if getgenv().MidnightCheat then getgenv().MidnightCheat:Destroy(true) end end })
 Window.Settings.Left:AddLabel("Config: " .. CONFIG_PATH)
 Window.Settings.Right:AddButton({ Text = "Save Config", Callback = function() persist() end })
 
@@ -233,11 +233,11 @@ local AimTab = Window:AddTab("Aimbot")
 local AimPage = AimTab:AddPage("Combat")
 AimPage.Left:AddToggle({ Text = "Enabled", Flag = "AimEnabled", Default = Aim.Enabled, Callback = function(v) Aim.Enabled = v persist() end })
 AimPage.Left:AddToggle({ Text = "Show FOV", Flag = "AimShowFOV", Default = Aim.ShowFOV, Callback = function(v) Aim.ShowFOV = v persist() end })
+AimPage.Left:AddToggle({ Text = "Ignore FOV", Flag = "AimIgnoreFOV", Default = Aim.IgnoreFOV, Callback = function(v) Aim.IgnoreFOV = v Aim.StickyTarget = nil persist() end })
 AimPage.Left:AddToggle({ Text = "Visible Check", Flag = "AimVisible", Default = Aim.Visible, Callback = function(v) Aim.Visible = v persist() end })
 AimPage.Left:AddToggle({ Text = "Team Check", Flag = "AimTeam", Default = Aim.TeamCheck, Callback = function(v) Aim.TeamCheck = v persist() end })
 AimPage.Left:AddToggle({ Text = "Sticky Aim", Flag = "AimSticky", Default = Aim.Sticky, Callback = function(v) Aim.Sticky = v Aim.StickyTarget = nil persist() end })
 AimPage.Right:AddKeybind({ Text = "Aim Key", Default = Aim.Key, Flag = "AimKey", Callback = function(k) Aim.Key = k persist() end })
-AimPage.Right:AddToggle({ Text = "Ignore FOV", Flag = "AimIgnoreFOV", Default = Aim.IgnoreFOV, Callback = function(v) Aim.IgnoreFOV = v Aim.StickyTarget = nil persist() end })
 AimPage.Right:AddSlider({ Text = "FOV", Min = 20, Max = 500, Default = Aim.FOV, Decimals = 0, ShowValue = true, Flag = "AimFOV", Callback = function(v) Aim.FOV = v persist() end })
 AimPage.Right:AddSlider({ Text = "Smoothness", Min = 1, Max = 20, Default = Aim.Smooth, Decimals = 1, ShowValue = true, Flag = "AimSmooth", Callback = function(v) Aim.Smooth = v persist() end })
 AimPage.Bottom:AddDropdown({ Text = "Target Part", Options = { "Head", "HeadHB", "Torso", "HumanoidRootPart" }, Default = Aim.Part, Flag = "AimPart", Callback = function(v) Aim.Part = v persist() end })
@@ -895,5 +895,5 @@ end
 getgenv().MidnightCheat = Controller
 getgenv().MidnightState = { Aim = Aim, Esp = Esp, Radar = Radar, Exploits = Exploits }
 persist()
-print("[Midnight] loaded for " .. gameName)
+print("[Midnight] loaded for " .. gameName .. " (ignore-fov-fix)")
 print("[Midnight] esp=" .. tostring(Esp.Enabled) .. " radar=" .. tostring(Radar.Enabled) .. " players=" .. tostring(#Players:GetPlayers() - 1))
