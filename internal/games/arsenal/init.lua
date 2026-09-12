@@ -143,6 +143,10 @@ local Radar = {
 local Exploits = {
     NoSpread = SavedExploits.NoSpread == true,
     NoRecoil = SavedExploits.NoRecoil == true,
+    RapidFire = SavedExploits.RapidFire == true,
+    InstantReload = SavedExploits.InstantReload == true,
+    AlwaysAuto = SavedExploits.AlwaysAuto == true,
+    InfiniteAmmo = SavedExploits.InfiniteAmmo == true,
 }
 
 local Settings = { MenuKey = keyFrom(SavedSettings.MenuKey, Enum.KeyCode.RightShift), Scheme = SavedSettings.Scheme or "Midnight" }
@@ -166,7 +170,11 @@ local function snapshot()
             RadarOffsetY = Radar.OffsetY, RadarCustomX = Radar.CustomX, RadarCustomY = Radar.CustomY,
             RadarBgAlpha = Radar.BgAlpha, RadarCrosshair = Radar.Crosshair, RadarDotSize = Radar.DotSize,
         },
-        Exploits = { NoSpread = Exploits.NoSpread, NoRecoil = Exploits.NoRecoil },
+        Exploits = {
+            NoSpread = Exploits.NoSpread, NoRecoil = Exploits.NoRecoil,
+            RapidFire = Exploits.RapidFire, InstantReload = Exploits.InstantReload,
+            AlwaysAuto = Exploits.AlwaysAuto, InfiniteAmmo = Exploits.InfiniteAmmo,
+        },
         Settings = { MenuKey = keyName(menuKey), Scheme = scheme },
     }
 end
@@ -261,17 +269,30 @@ local ExploitTab = Window:AddTab("Exploits")
 local ExploitPage = ExploitTab:AddPage("Weapons")
 ExploitPage.Left:AddToggle({ Text = "No Spread", Flag = "ExpNoSpread", Default = Exploits.NoSpread, Callback = function(v) Exploits.NoSpread = v applyWeaponExploits() persist() end })
 ExploitPage.Left:AddToggle({ Text = "No Recoil", Flag = "ExpNoRecoil", Default = Exploits.NoRecoil, Callback = function(v) Exploits.NoRecoil = v applyWeaponExploits() persist() end })
-ExploitPage.Right:AddLabel("Patches ReplicatedStorage.Weapons")
-ExploitPage.Right:AddLabel("Spread, MaxSpread, SpreadRecovery")
-ExploitPage.Right:AddLabel("RecoilControl on equipped guns")
+ExploitPage.Left:AddToggle({ Text = "Rapid Fire", Flag = "ExpRapidFire", Default = Exploits.RapidFire, Callback = function(v) Exploits.RapidFire = v applyWeaponExploits() persist() end })
+ExploitPage.Left:AddToggle({ Text = "Instant Reload", Flag = "ExpInstantReload", Default = Exploits.InstantReload, Callback = function(v) Exploits.InstantReload = v applyWeaponExploits() persist() end })
+ExploitPage.Right:AddToggle({ Text = "Always Auto", Flag = "ExpAlwaysAuto", Default = Exploits.AlwaysAuto, Callback = function(v) Exploits.AlwaysAuto = v applyWeaponExploits() persist() end })
+ExploitPage.Right:AddToggle({ Text = "Infinite Ammo", Flag = "ExpInfiniteAmmo", Default = Exploits.InfiniteAmmo, Callback = function(v) Exploits.InfiniteAmmo = v applyWeaponExploits() persist() end })
+ExploitPage.Right:AddLabel("FireRate 0.025 | ReloadTime 0")
+ExploitPage.Right:AddLabel("Auto = true | Infinite folder")
 
 weaponDefaults = {}
 weaponConns = {}
 local toolHooks = {}
-local templatesPatched = false
+local infiniteAdded = {}
+local RAPID_FIRE_RATE = 0.025
+local INSTANT_RELOAD_TIME = 0
+
+local function anyExploitOn()
+    return Exploits.NoSpread or Exploits.NoRecoil or Exploits.RapidFire or Exploits.InstantReload or Exploits.AlwaysAuto or Exploits.InfiniteAmmo
+end
 
 local function rememberWeaponValue(val)
     if val and weaponDefaults[val] == nil then weaponDefaults[val] = val.Value end
+end
+
+local function restoreWeaponValue(val)
+    if val and weaponDefaults[val] ~= nil then val.Value = weaponDefaults[val] end
 end
 
 local function collectToolValues(tool)
@@ -280,7 +301,35 @@ local function collectToolValues(tool)
         maxSpread = tool:FindFirstChild("MaxSpread"),
         recovery = tool:FindFirstChild("SpreadRecovery"),
         recoil = tool:FindFirstChild("RecoilControl") or tool:FindFirstChild("Recoil"),
+        fireRate = tool:FindFirstChild("FireRate"),
+        reloadTime = tool:FindFirstChild("ReloadTime"),
+        auto = tool:FindFirstChild("Auto"),
+        root = tool,
     }
+end
+
+local function toolNeedsHook(tool)
+    if not tool then return false end
+    local vals = collectToolValues(tool)
+    if vals.spread or vals.maxSpread or vals.recoil or vals.recovery or vals.fireRate or vals.reloadTime or vals.auto then
+        return true
+    end
+    return Exploits.InfiniteAmmo and (tool:IsA("Tool") or tool:IsA("Folder") or tool:IsA("ModuleScript"))
+end
+
+local function ensureInfiniteFolder(root)
+    if not root or not Exploits.InfiniteAmmo then return end
+    if root:FindFirstChild("Infinite") then return end
+    local folder = Instance.new("Folder")
+    folder.Name = "Infinite"
+    folder.Parent = root
+    infiniteAdded[root] = folder
+end
+
+local function removeAddedInfiniteFolder(root)
+    local folder = infiniteAdded[root]
+    if folder and folder.Parent then pcall(function() folder:Destroy() end) end
+    infiniteAdded[root] = nil
 end
 
 local function applyToolValues(vals)
@@ -290,16 +339,43 @@ local function applyToolValues(vals)
         if vals.maxSpread then rememberWeaponValue(vals.maxSpread) if vals.maxSpread.Value ~= 0 then vals.maxSpread.Value = 0 end end
         if vals.recovery then rememberWeaponValue(vals.recovery) if vals.recovery.Value ~= 999 then vals.recovery.Value = 999 end end
     else
-        if vals.spread and weaponDefaults[vals.spread] ~= nil then vals.spread.Value = weaponDefaults[vals.spread] end
-        if vals.maxSpread and weaponDefaults[vals.maxSpread] ~= nil then vals.maxSpread.Value = weaponDefaults[vals.maxSpread] end
-        if vals.recovery and weaponDefaults[vals.recovery] ~= nil then vals.recovery.Value = weaponDefaults[vals.recovery] end
+        restoreWeaponValue(vals.spread)
+        restoreWeaponValue(vals.maxSpread)
+        restoreWeaponValue(vals.recovery)
     end
     if Exploits.NoRecoil and vals.recoil then
         rememberWeaponValue(vals.recoil)
         if vals.recoil.Value ~= 0 then vals.recoil.Value = 0 end
-    elseif vals.recoil and weaponDefaults[vals.recoil] ~= nil then
-        vals.recoil.Value = weaponDefaults[vals.recoil]
+    else
+        restoreWeaponValue(vals.recoil)
     end
+    if Exploits.RapidFire and vals.fireRate then
+        rememberWeaponValue(vals.fireRate)
+        if vals.fireRate.Value ~= RAPID_FIRE_RATE then vals.fireRate.Value = RAPID_FIRE_RATE end
+    else
+        restoreWeaponValue(vals.fireRate)
+    end
+    if Exploits.InstantReload and vals.reloadTime then
+        rememberWeaponValue(vals.reloadTime)
+        if vals.reloadTime.Value ~= INSTANT_RELOAD_TIME then vals.reloadTime.Value = INSTANT_RELOAD_TIME end
+    else
+        restoreWeaponValue(vals.reloadTime)
+    end
+    if Exploits.AlwaysAuto and vals.auto then
+        rememberWeaponValue(vals.auto)
+        if vals.auto.Value ~= true then vals.auto.Value = true end
+    else
+        restoreWeaponValue(vals.auto)
+    end
+    if vals.root then
+        if Exploits.InfiniteAmmo then ensureInfiniteFolder(vals.root)
+        elseif infiniteAdded[vals.root] then removeAddedInfiniteFolder(vals.root) end
+    end
+end
+
+local function applyWeaponRoot(root)
+    if not root then return end
+    applyToolValues(collectToolValues(root))
 end
 
 local function clearToolHook(tool)
@@ -311,12 +387,12 @@ end
 
 local function hookEquippedTool(tool)
     if not tool or not tool:IsA("Tool") or toolHooks[tool] then return end
+    if not toolNeedsHook(tool) then return end
     local vals = collectToolValues(tool)
-    if not vals.spread and not vals.maxSpread and not vals.recoil and not vals.recovery then return end
     local conns = {}
     local refreshAt = 0
     local function refresh()
-        if Exploits.NoSpread or Exploits.NoRecoil then applyToolValues(vals) end
+        if anyExploitOn() then applyToolValues(vals) end
     end
     local function debouncedRefresh()
         local now = os.clock()
@@ -335,14 +411,12 @@ local function hookEquippedTool(tool)
 end
 
 local function patchWeaponTemplates()
-    if templatesPatched then return end
-    templatesPatched = true
     task.spawn(function()
         local folder = ReplicatedStorage:FindFirstChild("Weapons")
         if not folder then return end
         local kids = folder:GetChildren()
         for i, weapon in ipairs(kids) do
-            if Exploits.NoSpread or Exploits.NoRecoil then applyToolValues(collectToolValues(weapon)) end
+            if anyExploitOn() then applyWeaponRoot(weapon) end
             if i % 25 == 0 then task.wait() end
         end
     end)
@@ -356,13 +430,16 @@ local function scanCharacterTools(char)
 end
 
 function applyWeaponExploits()
-    if Exploits.NoSpread or Exploits.NoRecoil then
+    if anyExploitOn() then
         patchWeaponTemplates()
         scanCharacterTools(LocalPlayer.Character)
     else
         for tool, hook in pairs(toolHooks) do
             applyToolValues(hook.vals)
             clearToolHook(tool)
+        end
+        for root in pairs(infiniteAdded) do
+            removeAddedInfiniteFolder(root)
         end
     end
 end
@@ -379,7 +456,7 @@ end
 
 table.insert(weaponConns, LocalPlayer.CharacterAdded:Connect(onCharacterReady))
 if LocalPlayer.Character then onCharacterReady(LocalPlayer.Character) end
-if Exploits.NoSpread or Exploits.NoRecoil then applyWeaponExploits() end
+if anyExploitOn() then applyWeaponExploits() end
 
 local function newDraw(kind, props) local d = Drawing.new(kind) for k, v in pairs(props) do d[k] = v end return d end
 local function newLines(n, thick, col) local t = {} for i = 1, n do t[i] = newDraw("Line", { Thickness = thick, Visible = false, Transparency = 1, Color = col }) end return t end
@@ -755,6 +832,7 @@ function Controller:Destroy(skipLibrary)
     Aim.ActiveTarget = nil Aim.StickyTarget = nil
     if weaponConns then for _, c in ipairs(weaponConns) do pcall(function() c:Disconnect() end) end weaponConns = {} end
     for tool in pairs(toolHooks) do clearToolHook(tool) end
+    for root in pairs(infiniteAdded) do removeAddedInfiniteFolder(root) end
     visCache = {}
     if not skipLibrary and Library then Library:Destroy() end
     getgenv().MidnightCheat = nil
