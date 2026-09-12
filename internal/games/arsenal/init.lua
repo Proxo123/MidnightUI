@@ -148,6 +148,7 @@ local Exploits = {
     InstantEquip = SavedExploits.InstantEquip == true,
     AlwaysAuto = SavedExploits.AlwaysAuto == true,
     InfiniteAmmo = SavedExploits.InfiniteAmmo == true,
+    InstantProjectiles = SavedExploits.InstantProjectiles == true,
 }
 
 local Settings = { MenuKey = keyFrom(SavedSettings.MenuKey, Enum.KeyCode.RightShift), Scheme = SavedSettings.Scheme or "Midnight" }
@@ -175,6 +176,7 @@ local function snapshot()
             NoSpread = Exploits.NoSpread, NoRecoil = Exploits.NoRecoil,
             RapidFire = Exploits.RapidFire, InstantReload = Exploits.InstantReload,
             InstantEquip = Exploits.InstantEquip, AlwaysAuto = Exploits.AlwaysAuto, InfiniteAmmo = Exploits.InfiniteAmmo,
+            InstantProjectiles = Exploits.InstantProjectiles,
         },
         Settings = { MenuKey = keyName(menuKey), Scheme = scheme },
     }
@@ -275,6 +277,7 @@ ExploitPage.Left:AddToggle({ Text = "Instant Reload", Flag = "ExpInstantReload",
 ExploitPage.Left:AddToggle({ Text = "Instant Equip", Flag = "ExpInstantEquip", Default = Exploits.InstantEquip, Callback = function(v) Exploits.InstantEquip = v applyWeaponExploits() persist() end })
 ExploitPage.Right:AddToggle({ Text = "Always Auto", Flag = "ExpAlwaysAuto", Default = Exploits.AlwaysAuto, Callback = function(v) Exploits.AlwaysAuto = v applyWeaponExploits() persist() end })
 ExploitPage.Right:AddToggle({ Text = "Infinite Ammo", Flag = "ExpInfiniteAmmo", Default = Exploits.InfiniteAmmo, Callback = function(v) Exploits.InfiniteAmmo = v applyWeaponExploits() persist() end })
+ExploitPage.Right:AddToggle({ Text = "Instant Projectiles", Flag = "ExpInstantProjectiles", Default = Exploits.InstantProjectiles, Callback = function(v) Exploits.InstantProjectiles = v applyWeaponExploits() persist() end })
 
 weaponDefaults = {}
 weaponConns = {}
@@ -283,9 +286,10 @@ local infiniteAdded = {}
 local RAPID_FIRE_RATE = 0.025
 local INSTANT_RELOAD_TIME = 0
 local INSTANT_EQUIP_TIME = 0
+local INSTANT_PROJECTILE_SPEED = 90000
 
 local function anyExploitOn()
-    return Exploits.NoSpread or Exploits.NoRecoil or Exploits.RapidFire or Exploits.InstantReload or Exploits.InstantEquip or Exploits.AlwaysAuto or Exploits.InfiniteAmmo
+    return Exploits.NoSpread or Exploits.NoRecoil or Exploits.RapidFire or Exploits.InstantReload or Exploits.InstantEquip or Exploits.AlwaysAuto or Exploits.InfiniteAmmo or Exploits.InstantProjectiles
 end
 
 local function rememberWeaponValue(val)
@@ -306,6 +310,9 @@ local function collectToolValues(tool)
         reloadTime = tool:FindFirstChild("ReloadTime"),
         equipTime = tool:FindFirstChild("EquipTime"),
         auto = tool:FindFirstChild("Auto"),
+        speed = tool:FindFirstChild("Speed"),
+        bulletSpeed = tool:FindFirstChild("BulletSpeed"),
+        maxSpeed = tool:FindFirstChild("MaxSpeed"),
         root = tool,
     }
 end
@@ -313,7 +320,7 @@ end
 local function toolNeedsHook(tool)
     if not tool then return false end
     local vals = collectToolValues(tool)
-    if vals.spread or vals.maxSpread or vals.recoil or vals.recovery or vals.fireRate or vals.reloadTime or vals.equipTime or vals.auto then
+    if vals.spread or vals.maxSpread or vals.recoil or vals.recovery or vals.fireRate or vals.reloadTime or vals.equipTime or vals.auto or vals.speed or vals.bulletSpeed or vals.maxSpeed then
         return true
     end
     return Exploits.InfiniteAmmo and (tool:IsA("Tool") or tool:IsA("Folder") or tool:IsA("ModuleScript"))
@@ -375,6 +382,15 @@ local function applyToolValues(vals)
     else
         restoreWeaponValue(vals.auto)
     end
+    if Exploits.InstantProjectiles then
+        if vals.speed then rememberWeaponValue(vals.speed) if vals.speed.Value ~= INSTANT_PROJECTILE_SPEED then vals.speed.Value = INSTANT_PROJECTILE_SPEED end end
+        if vals.bulletSpeed then rememberWeaponValue(vals.bulletSpeed) if vals.bulletSpeed.Value ~= INSTANT_PROJECTILE_SPEED then vals.bulletSpeed.Value = INSTANT_PROJECTILE_SPEED end end
+        if vals.maxSpeed then rememberWeaponValue(vals.maxSpeed) if vals.maxSpeed.Value ~= INSTANT_PROJECTILE_SPEED then vals.maxSpeed.Value = INSTANT_PROJECTILE_SPEED end end
+    else
+        restoreWeaponValue(vals.speed)
+        restoreWeaponValue(vals.bulletSpeed)
+        restoreWeaponValue(vals.maxSpeed)
+    end
     if vals.root then
         if Exploits.InfiniteAmmo then ensureInfiniteFolder(vals.root)
         elseif infiniteAdded[vals.root] then removeAddedInfiniteFolder(vals.root) end
@@ -393,8 +409,12 @@ local function clearToolHook(tool)
     toolHooks[tool] = nil
 end
 
+local function isWeaponRoot(item)
+    return item and (item:IsA("Tool") or item:IsA("Folder")) and item:FindFirstChild("FireRate")
+end
+
 local function hookEquippedTool(tool)
-    if not tool or not tool:IsA("Tool") or toolHooks[tool] then return end
+    if not isWeaponRoot(tool) or toolHooks[tool] then return end
     if not toolNeedsHook(tool) then return end
     local vals = collectToolValues(tool)
     local conns = {}
@@ -435,7 +455,7 @@ end
 local function scanCharacterTools(char)
     if not char then return end
     for _, item in ipairs(char:GetChildren()) do
-        if item:IsA("Tool") then hookEquippedTool(item) end
+        if isWeaponRoot(item) then hookEquippedTool(item) end
     end
 end
 
@@ -457,10 +477,10 @@ end
 local function onCharacterReady(char)
     scanCharacterTools(char)
     table.insert(weaponConns, char.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then task.defer(hookEquippedTool, child) end
+        if isWeaponRoot(child) then task.defer(hookEquippedTool, child) end
     end))
     table.insert(weaponConns, char.ChildRemoved:Connect(function(child)
-        if child:IsA("Tool") then clearToolHook(child) end
+        if toolHooks[child] then clearToolHook(child) end
     end))
 end
 
